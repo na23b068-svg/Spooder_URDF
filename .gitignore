@@ -1,0 +1,21 @@
+# Ignore Python compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore OS files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE configurations
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Ignore ROS build artifacts (if any are built locally)
+devel/
+build/
+logs/
+.catkin_tools/
