@@ -4,15 +4,9 @@ import sys
 import time
 
 # Add isaaclab scripts directory to sys.path for importing cli_args and utilities
-possible_paths = [
-    "/home/smeer/Downloads/isaaclab/scripts/reinforcement_learning/rsl_rl",
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "isaaclab", "scripts", "reinforcement_learning", "rsl_rl")),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "isaaclab", "scripts", "reinforcement_learning", "rsl_rl")),
-]
-for p in possible_paths:
-    if os.path.exists(p):
-        sys.path.append(p)
-        break
+import isaaclab
+isaaclab_dir = list(isaaclab.__path__)[0]
+sys.path.append(os.path.join(isaaclab_dir, "scripts", "reinforcement_learning", "rsl_rl"))
 
 from isaaclab.app import AppLauncher
 
