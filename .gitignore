@@ -19,3 +19,6 @@ devel/
 build/
 logs/
 .catkin_tools/
+
+# Do not ignore spooder_training logs and checkpoints
+!spooder_training/logs/
