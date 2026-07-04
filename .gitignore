@@ -17,5 +17,5 @@ Thumbs.db
 # Ignore ROS build artifacts (if any are built locally)
 devel/
 build/
-logs/
+# logs/
 .catkin_tools/
