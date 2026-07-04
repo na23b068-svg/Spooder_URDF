@@ -17,7 +17,7 @@ Thumbs.db
 # Ignore ROS build artifacts (if any are built locally)
 devel/
 build/
-logs/
+# logs/
 .catkin_tools/
 
 # Do not ignore spooder_training logs and checkpoints
