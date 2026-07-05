@@ -18,6 +18,7 @@ parser.add_argument("--video_length", type=int, default=200, help="Length of the
 parser.add_argument("--num_envs", type=int, default=16, help="Number of environments to simulate.")
 parser.add_argument("--task", type=str, default="Isaac-Velocity-Flat-Spooder-v0", help="Name of the task.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
+parser.add_argument("--keyboard", action="store_true", default=False, help="Enable keyboard control (Arrow Keys / WASD).")
 
 # Add RSL-RL and AppLauncher arguments
 import cli_args
@@ -41,9 +42,9 @@ from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
 from isaaclab.utils.assets import retrieve_file_path
 
 # Import our custom environment config
-from spooder_env_cfg import SpooderFlatEnvCfg, SpooderFlatPPORunnerCfg
+from spooder_env_cfg import SpooderFlatEnvCfg, SpooderRoughEnvCfg, SpooderFlatPPORunnerCfg
 
-# Register environment in Gym
+# Register both Flat and Rough environments in Gym
 gym.register(
     id="Isaac-Velocity-Flat-Spooder-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
@@ -54,11 +55,25 @@ gym.register(
     },
 )
 
+gym.register(
+    id="Isaac-Velocity-Rough-Spooder-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": SpooderRoughEnvCfg,
+        "rsl_rl_cfg_entry_point": SpooderFlatPPORunnerCfg,
+    },
+)
+
 def main():
     installed_version = metadata.version("rsl-rl-lib")
 
-    # Load configs
-    env_cfg = SpooderFlatEnvCfg()
+    # Load configs based on task selection
+    if "Flat" in args_cli.task:
+        env_cfg = SpooderFlatEnvCfg()
+    else:
+        env_cfg = SpooderRoughEnvCfg()
+        
     agent_cfg = SpooderFlatPPORunnerCfg()
 
     # Smaller scene settings for play
@@ -103,15 +118,35 @@ def main():
     # Obtain policy
     policy = runner.get_inference_policy(device=env.unwrapped.device)
 
+    # Set up keyboard controller if requested
+    keyboard = None
+    if args_cli.keyboard:
+        from isaaclab.devices.keyboard import Se2Keyboard, Se2KeyboardCfg
+        keyboard = Se2Keyboard(Se2KeyboardCfg(sim_device=env.unwrapped.device))
+        print("\n" + "="*80)
+        print("🎮 INTERACTIVE KEYBOARD CONTROL ACTIVE")
+        print("Use Arrow Keys (Up/Down/Left/Right) or Numpad to drive the Spooder!")
+        print("Press 'Z' to Yaw left, 'X' to Yaw right, 'L' to Reset/Stop.")
+        print("="*80 + "\n")
+
     dt = env.unwrapped.step_dt
     obs = env.get_observations()
 
     # Play loop
     while simulation_app.is_running():
         start_time = time.time()
+        
+        # Override commands with keyboard input if enabled
+        if keyboard is not None:
+            keyboard_command = keyboard.advance()
+            # Match env command dimension shape (num_envs, 3)
+            cmd_term = env.unwrapped.command_manager.get_term("base_velocity")
+            cmd_term.vel_command_b[:] = keyboard_command.to(env.unwrapped.device)
+
         with torch.inference_mode():
             actions = policy(obs)
             obs, _, dones, _ = env.step(actions)
+
             if version.parse(installed_version) >= version.parse("4.0.0"):
                 policy.reset(dones)
         
