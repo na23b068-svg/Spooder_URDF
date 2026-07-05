@@ -2,6 +2,7 @@ import os
 import math
 import torch
 import isaaclab.sim as sim_utils
+import isaaclab.envs.mdp as mdp
 from isaaclab.assets import ArticulationCfg
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.utils import configclass
@@ -30,19 +31,14 @@ def feet_slide_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, asset
 
 def spawn_zone_penalty(env: ManagerBasedRLEnv, scale: float = 2.0) -> torch.Tensor:
     """Penalizes the robot for staying close to its spawn origin when commanded to walk."""
-    # Global robot XY coordinates: (num_envs, 2)
     root_pos = env.scene["robot"].data.root_pos_w[:, :2]
-    # Local environment spawn origins: (num_envs, 2)
     env_origins = env.scene.env_origins[:, :2]
     
-    # Distance from spawn point
     local_pos = root_pos - env_origins
     distance = torch.norm(local_pos, dim=-1)
     
-    # Smooth exponential penalty: decays as the robot moves further away
     penalty = torch.exp(-distance * scale)
     
-    # Apply penalty only when commanded to walk (command norm > 0.1)
     commands = env.command_manager.get_command("base_velocity")
     is_walking = torch.norm(commands[:, 0:2], dim=-1) > 0.1
     
@@ -155,7 +151,13 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = "link_2_step_v1_.*"
         self.rewards.undesired_contacts.weight = -1.0
         
-        # 5. Locomotion rewards & Penalties
+        # 5. Symmetric Gait / Joint Stance Regularization (encourages neat tripod gait)
+        self.rewards.joint_deviation_l1 = RewTerm(
+            func=mdp.joint_deviation_l1,
+            weight=-0.1,
+        )
+        
+        # 6. Locomotion rewards & Penalties
         self.rewards.flat_orientation_l2.weight = -2.5
         self.rewards.dof_pos_limits.weight = -10.0
         self.rewards.dof_torques_l2.weight = -1.0e-5
@@ -190,7 +192,7 @@ class SpooderFlatEnvCfg(SpooderRoughEnvCfg):
 @configclass
 class SpooderFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 128
-    max_iterations = 1000
+    max_iterations = 1500  # Increased for rough terrain and symmetric gait convergence
     save_interval = 50
     experiment_name = "spooder_flat"
     policy = RslRlPpoActorCriticCfg(
