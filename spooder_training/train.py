@@ -125,7 +125,11 @@ def main():
         runner.load(resume_path)
 
     # Start learning
-    runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+    num_iterations = agent_cfg.max_iterations
+    if args_cli.resume:
+        num_iterations = max(0, agent_cfg.max_iterations - runner.current_learning_iteration)
+        
+    runner.learn(num_learning_iterations=num_iterations, init_at_random_ep_len=True)
 
     # Close environment
     env.close()
