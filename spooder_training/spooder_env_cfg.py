@@ -3,41 +3,38 @@ import math
 import torch
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.utils import configclass
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import SceneEntityCfg
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
 # --- Custom Reward Functions ---
 
-def stance_feet_contact_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
-    """Rewards keeping stationary/support legs down on the floor to prevent floating."""
-    # Net vertical contact forces on the 6 feet (shape: num_envs, 6)
-    # sensor named "contact_forces" tracks contacts for the entire articulation
-    # but we filter vertical force components (Z-axis is index 2)
-    foot_forces = env.scene["contact_forces"].data.net_forces_w[:, :, 2]
+def feet_slide_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Penalizes dragging or sliding feet while in contact with the ground."""
+    # Find the contact forces sensor (which tracks all links of the robot)
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
     
-    # Count feet with firm contact (force > 1.0 Newton)
-    in_contact = foot_forces > 1.0
-    num_contacts = torch.sum(in_contact.float(), dim=-1)
+    # Extract forces for the specific foot body IDs: shape (num_envs, num_feet, 3)
+    forces = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :]
     
-    # Check if the robot is standing still (command velocity is zero)
-    commands = env.command_manager.get_command("base_velocity")
-    is_standing = torch.norm(commands[:, 0:2], dim=-1) < 0.1
+    # Determine contact state (net force norm > 1.0 N)
+    contacts = torch.norm(forces, dim=-1) > 1.0
     
-    # If standing still: reward having all 6 feet on the ground
-    # If walking: reward having at least 3 feet on the ground (tripod gait support phase)
-    reward = torch.where(
-        is_standing,
-        num_contacts / 6.0,
-        torch.clamp(num_contacts, max=3.0) / 3.0
-    )
+    # Get foot linear velocity in the world horizontal (XY) plane
+    asset = env.scene[asset_cfg.name]
+    foot_vel = asset.data.body_lin_vel_w[:, sensor_cfg.body_ids, :2]
     
-    return reward
+    # Calculate slide speed: linear velocity norm when in contact
+    slide_speed = torch.norm(foot_vel, dim=-1) * contacts
+    
+    # Return sum of slide speeds across all feet
+    return torch.sum(slide_speed, dim=-1)
 
 
 # --- Robot Asset Configuration ---
@@ -63,7 +60,7 @@ SPOODER_CFG = ArticulationCfg(
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.08),  # Spawn height (about 8cm)
-        # Symmetrical design stance (Request 1 & 2):
+        # Symmetrical design stance:
         joint_pos={
             "Revolute.*": 0.0,  # All 18 joints start at 0.0 radians
         },
@@ -97,11 +94,11 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Configure contact sensors
         self.scene.contact_forces.prim_path = "{ENV_REGEX_NS}/Robot/.*"
 
-        # Action scale & Stance Bias Offset (Request 1)
+        # Action scale & Stance Bias Offset
         self.actions.joint_pos.scale = 0.25
         self.actions.joint_pos.use_default_offset = True
 
-        # Overrides for Events (Friction and base mass randomizations are already active)
+        # Overrides for Events
         self.events.add_base_mass.params["asset_cfg"].body_names = "base_link"
         self.events.add_base_mass.params["mass_distribution_params"] = (-0.1, 0.3)
         self.events.base_external_force_torque.params["asset_cfg"].body_names = "base_link"
@@ -119,32 +116,33 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             },
         }
 
-        # Rewards Overrides
-        # Track feet links (link_3_step_v1_1 through link_3_step_v1_6)
-        self.rewards.feet_air_time.params["sensor_cfg"].body_names = "link_3_step_v1_.*"
-        self.rewards.feet_air_time.weight = 0.05
+        # --- Rewards Configuration ---
         
-        # Undesired contact (legs above feet touching ground: link_2_step_v1_.*)
+        # 1. Stepping Air Time (Encourages taking distinct steps)
+        # We target the Z-contact sensor at feet links (link_3_step_v1_1 through link_3_step_v1_6)
+        self.rewards.feet_air_time.params["sensor_cfg"] = SceneEntityCfg("contact_forces", body_names="link_3_step_v1_.*")
+        self.rewards.feet_air_time.params["threshold"] = 0.2  # 0.2 seconds is a good step duration threshold
+        self.rewards.feet_air_time.weight = 0.5
+        
+        # 2. Feet Sliding Penalty (Encourages planting feet firmly - anti-float & anti-slip)
+        self.rewards.feet_slide = RewTerm(
+            func=feet_slide_penalty,
+            weight=-0.25,
+            params={
+                "sensor_cfg": SceneEntityCfg("contact_forces", body_names="link_3_step_v1_.*"),
+                "asset_cfg": SceneEntityCfg("robot", body_names="link_3_step_v1_.*"),
+            }
+        )
+        
+        # 3. Undesired contact (legs above feet touching ground: link_2_step_v1_.*)
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = "link_2_step_v1_.*"
         self.rewards.undesired_contacts.weight = -1.0
         
-        # Penalize tilting too much
+        # 4. Stand/Locomotion rewards & Penalties
         self.rewards.flat_orientation_l2.weight = -2.5
-        
-        # Enable Soft Joint Limits Penalty (Request 3)
         self.rewards.dof_pos_limits.weight = -10.0
-        
-        # Custom Stance Leg Contact Force Reward (Floating legs prevention)
-        self.rewards.stance_feet_contact = RewTerm(
-            func=stance_feet_contact_reward,
-            weight=1.5
-        )
-        
-        # Joint torque and acceleration penalties
         self.rewards.dof_torques_l2.weight = -1.0e-5
         self.rewards.dof_acc_l2.weight = -2.5e-7
-        
-        # Forward velocity tracking reward
         self.rewards.track_lin_vel_xy_exp.weight = 2.0
         self.rewards.track_ang_vel_z_exp.weight = 0.5
         
