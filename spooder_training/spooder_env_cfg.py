@@ -17,24 +17,36 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 
 def feet_slide_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg) -> torch.Tensor:
     """Penalizes dragging or sliding feet while in contact with the ground."""
-    # Find the contact forces sensor (which tracks all links of the robot)
     contact_sensor = env.scene.sensors[sensor_cfg.name]
-    
-    # Extract forces for the specific foot body IDs: shape (num_envs, num_feet, 3)
     forces = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :]
-    
-    # Determine contact state (net force norm > 1.0 N)
     contacts = torch.norm(forces, dim=-1) > 1.0
     
-    # Get foot linear velocity in the world horizontal (XY) plane
     asset = env.scene[asset_cfg.name]
     foot_vel = asset.data.body_lin_vel_w[:, sensor_cfg.body_ids, :2]
     
-    # Calculate slide speed: linear velocity norm when in contact
     slide_speed = torch.norm(foot_vel, dim=-1) * contacts
-    
-    # Return sum of slide speeds across all feet
     return torch.sum(slide_speed, dim=-1)
+
+
+def spawn_zone_penalty(env: ManagerBasedRLEnv, scale: float = 2.0) -> torch.Tensor:
+    """Penalizes the robot for staying close to its spawn origin when commanded to walk."""
+    # Global robot XY coordinates: (num_envs, 2)
+    root_pos = env.scene["robot"].data.root_pos_w[:, :2]
+    # Local environment spawn origins: (num_envs, 2)
+    env_origins = env.scene.env_origins[:, :2]
+    
+    # Distance from spawn point
+    local_pos = root_pos - env_origins
+    distance = torch.norm(local_pos, dim=-1)
+    
+    # Smooth exponential penalty: decays as the robot moves further away
+    penalty = torch.exp(-distance * scale)
+    
+    # Apply penalty only when commanded to walk (command norm > 0.1)
+    commands = env.command_manager.get_command("base_velocity")
+    is_walking = torch.norm(commands[:, 0:2], dim=-1) > 0.1
+    
+    return penalty * is_walking.float()
 
 
 # --- Robot Asset Configuration ---
@@ -60,7 +72,6 @@ SPOODER_CFG = ArticulationCfg(
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.08),  # Spawn height (about 8cm)
-        # Symmetrical design stance:
         joint_pos={
             "Revolute.*": 0.0,  # All 18 joints start at 0.0 radians
         },
@@ -118,13 +129,12 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # --- Rewards Configuration ---
         
-        # 1. Stepping Air Time (Encourages taking distinct steps)
-        # We target the Z-contact sensor at feet links (link_3_step_v1_1 through link_3_step_v1_6)
+        # 1. Stepping Air Time
         self.rewards.feet_air_time.params["sensor_cfg"] = SceneEntityCfg("contact_forces", body_names="link_3_step_v1_.*")
-        self.rewards.feet_air_time.params["threshold"] = 0.2  # 0.2 seconds is a good step duration threshold
+        self.rewards.feet_air_time.params["threshold"] = 0.2
         self.rewards.feet_air_time.weight = 0.5
         
-        # 2. Feet Sliding Penalty (Encourages planting feet firmly - anti-float & anti-slip)
+        # 2. Feet Sliding Penalty (encourages planting feet firmly)
         self.rewards.feet_slide = RewTerm(
             func=feet_slide_penalty,
             weight=-0.25,
@@ -134,16 +144,25 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             }
         )
         
-        # 3. Undesired contact (legs above feet touching ground: link_2_step_v1_.*)
+        # 3. Spawn Zone Penalty (encourages leaving the spawn area)
+        self.rewards.spawn_zone_penalty = RewTerm(
+            func=spawn_zone_penalty,
+            weight=-1.5,
+            params={"scale": 2.0}
+        )
+        
+        # 4. Undesired contact (legs above feet touching ground)
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = "link_2_step_v1_.*"
         self.rewards.undesired_contacts.weight = -1.0
         
-        # 4. Stand/Locomotion rewards & Penalties
+        # 5. Locomotion rewards & Penalties
         self.rewards.flat_orientation_l2.weight = -2.5
         self.rewards.dof_pos_limits.weight = -10.0
         self.rewards.dof_torques_l2.weight = -1.0e-5
         self.rewards.dof_acc_l2.weight = -2.5e-7
-        self.rewards.track_lin_vel_xy_exp.weight = 2.0
+        
+        # Heavy linear velocity tracking to dominate standing-still alternatives (was 2.0)
+        self.rewards.track_lin_vel_xy_exp.weight = 5.0
         self.rewards.track_ang_vel_z_exp.weight = 0.5
         
         # Terminations Overrides
