@@ -6,7 +6,8 @@ from datetime import datetime
 # Add isaaclab scripts directory to sys.path for importing cli_args and utilities
 import isaaclab
 isaaclab_dir = list(isaaclab.__path__)[0]
-sys.path.append(os.path.join(isaaclab_dir, "scripts", "reinforcement_learning", "rsl_rl"))
+isaaclab_root = os.path.abspath(os.path.join(isaaclab_dir, "..", "..", ".."))
+sys.path.append(os.path.join(isaaclab_root, "scripts", "reinforcement_learning", "rsl_rl"))
 
 from isaaclab.app import AppLauncher
 
