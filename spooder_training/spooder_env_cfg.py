@@ -3,6 +3,8 @@ import math
 import torch
 import isaaclab.sim as sim_utils
 import isaaclab.envs.mdp as mdp
+import isaaclab.terrains as terrain_gen
+from isaaclab.terrains.terrain_generator_cfg import TerrainGeneratorCfg
 from isaaclab.assets import ArticulationCfg
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.utils import configclass
@@ -13,6 +15,62 @@ from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import Lo
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# --- Custom Terrain Config for Small Robot (8cm height) ---
+# We scale down all height properties to 1/10th scale to match Spooder's physical limits.
+SPOODER_ROUGH_TERRAINS_CFG = TerrainGeneratorCfg(
+    size=(8.0, 8.0),
+    border_width=20.0,
+    num_rows=10,
+    num_cols=20,
+    horizontal_scale=0.1,
+    vertical_scale=0.005,
+    slope_threshold=0.75,
+    use_cache=False,
+    sub_terrains={
+        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
+            proportion=0.2,
+            step_height_range=(0.005, 0.02),   # 0.5cm to 2.0cm step height
+            step_width=0.2,                    # 20cm step width
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+        ),
+        "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
+            proportion=0.2,
+            step_height_range=(0.005, 0.02),
+            step_width=0.2,
+            platform_width=3.0,
+            border_width=1.0,
+            holes=False,
+        ),
+        "boxes": terrain_gen.MeshRandomGridTerrainCfg(
+            proportion=0.2, 
+            grid_width=0.3, 
+            grid_height_range=(0.005, 0.015),   # 0.5cm to 1.5cm box height
+            platform_width=2.0
+        ),
+        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
+            proportion=0.2, 
+            noise_range=(0.005, 0.012),        # 0.5cm to 1.2cm height bumps
+            noise_step=0.003, 
+            border_width=0.25
+        ),
+        "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
+            proportion=0.1, 
+            slope_range=(0.0, 0.15),           # Up to 15% slope (was 40%)
+            platform_width=2.0, 
+            border_width=0.25
+        ),
+        "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
+            proportion=0.1, 
+            slope_range=(0.0, 0.15),
+            platform_width=2.0, 
+            border_width=0.25
+        ),
+    },
+)
+
 
 # --- Custom Reward Functions ---
 
@@ -67,7 +125,7 @@ SPOODER_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.08),  # Spawn height (about 8cm)
+        pos=(0.0, 0.0, 0.09),  # Spawn height adjusted to 9cm to prevent immediate base contact on slopes
         joint_pos={
             "Revolute.*": 0.0,  # All 18 joints start at 0.0 radians
         },
@@ -100,6 +158,9 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         
         # Configure contact sensors
         self.scene.contact_forces.prim_path = "{ENV_REGEX_NS}/Robot/.*"
+        
+        # Apply the micro-rough terrain generator scaled for Spooder
+        self.scene.terrain.terrain_generator = SPOODER_ROUGH_TERRAINS_CFG
 
         # Action scale & Stance Bias Offset
         self.actions.joint_pos.scale = 0.25
@@ -163,7 +224,7 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.dof_torques_l2.weight = -1.0e-5
         self.rewards.dof_acc_l2.weight = -2.5e-7
         
-        # Heavy linear velocity tracking to dominate standing-still alternatives (was 2.0)
+        # Heavy linear velocity tracking to dominate standing-still alternatives
         self.rewards.track_lin_vel_xy_exp.weight = 5.0
         self.rewards.track_ang_vel_z_exp.weight = 0.5
         
@@ -191,26 +252,26 @@ class SpooderFlatEnvCfg(SpooderRoughEnvCfg):
 
 @configclass
 class SpooderFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 128
-    max_iterations = 1500  # Increased for rough terrain and symmetric gait convergence
+    num_steps_per_env = 32  # Shorter steps for robust trajectory updates on rough terrain
+    max_iterations = 1500
     save_interval = 50
     experiment_name = "spooder_flat"
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_obs_normalization=False,
         critic_obs_normalization=False,
-        actor_hidden_dims=[128, 128, 128],
-        critic_hidden_dims=[128, 128, 128],
+        actor_hidden_dims=[512, 256, 128],  # Wider network for processing the 187 height scan dimensions
+        critic_hidden_dims=[512, 256, 128],
         activation="elu",
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.01,
+        entropy_coef=0.005,  # Slightly lower entropy for stable convergence
         num_learning_epochs=5,
         num_mini_batches=4,
-        learning_rate=1.0e-3,
+        learning_rate=5.0e-4,  # Lower learning rate (was 1e-3) to prevent value loss explosion
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
