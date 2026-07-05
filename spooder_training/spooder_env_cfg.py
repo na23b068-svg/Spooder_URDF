@@ -231,7 +231,7 @@ class SpooderFlatEnvCfg(SpooderRoughEnvCfg):
 
 @configclass
 class SpooderFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 32  # Shorter steps for robust trajectory updates on rough terrain
+    num_steps_per_env = 128  # 128 steps per rollout (~5s iteration time for stable walking trajectories)
     max_iterations = 1500
     save_interval = 50
     experiment_name = "spooder_flat"
