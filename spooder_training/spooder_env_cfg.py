@@ -101,6 +101,32 @@ def stance_feet_contact_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
     return reward
 
 
+# --- Custom Termination Functions ---
+
+def check_nan_termination(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Terminates and resets the environment immediately if any physics values blow up to NaN or Inf."""
+    robot = env.scene["robot"]
+    
+    # Check if robot base coordinates or joint positions/velocities are NaN
+    nan_root = torch.isnan(robot.data.root_pos_w).any(dim=-1)
+    nan_joints = torch.isnan(robot.data.joint_pos).any(dim=-1) | torch.isnan(robot.data.joint_vel).any(dim=-1)
+    
+    # Check if robot base coordinates or joint positions/velocities are Inf
+    inf_root = torch.isinf(robot.data.root_pos_w).any(dim=-1)
+    inf_joints = torch.isinf(robot.data.joint_pos).any(dim=-1) | torch.isinf(robot.data.joint_vel).any(dim=-1)
+    
+    nan_or_inf = nan_root | nan_joints | inf_root | inf_joints
+    
+    # Check contact sensor forces for NaN/Inf
+    contact_sensor = env.scene.sensors.get("contact_forces")
+    if contact_sensor is not None:
+        nan_contacts = torch.isnan(contact_sensor.data.net_forces_w).any(dim=-1).any(dim=-1)
+        inf_contacts = torch.isinf(contact_sensor.data.net_forces_w).any(dim=-1).any(dim=-1)
+        nan_or_inf |= nan_contacts | inf_contacts
+        
+    return nan_or_inf
+
+
 # --- Robot Asset Configuration ---
 
 SPOODER_CFG = ArticulationCfg(
@@ -216,6 +242,11 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.terminations.height_below_minimum = DoneTerm(
             func=mdp.root_height_below_minimum,
             params={"minimum_height": -0.2}
+        )
+        
+        # Terminate if any state explodes to NaN/Inf (prevents numerical instability crashes)
+        self.terminations.nan_check = DoneTerm(
+            func=check_nan_termination
         )
 
 
