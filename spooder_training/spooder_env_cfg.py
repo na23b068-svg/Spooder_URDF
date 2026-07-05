@@ -10,6 +10,7 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.utils import configclass
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
@@ -210,6 +211,12 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Terminations Overrides
         # Terminate if the base_link touches the ground
         self.terminations.base_contact.params["sensor_cfg"].body_names = "base_link"
+        
+        # Terminate if the robot falls off the terrain grid cliff (prevents NaN values)
+        self.terminations.height_below_minimum = DoneTerm(
+            func=mdp.root_height_below_minimum,
+            params={"minimum_height": -0.2}
+        )
 
 
 @configclass
