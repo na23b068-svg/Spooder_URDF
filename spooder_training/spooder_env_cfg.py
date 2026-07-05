@@ -18,7 +18,6 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 # --- Custom Terrain Config for Small Robot (8cm height) ---
-# We scale down all height properties to 1/10th scale to match Spooder's physical limits.
 SPOODER_ROUGH_TERRAINS_CFG = TerrainGeneratorCfg(
     size=(8.0, 8.0),
     border_width=20.0,
@@ -53,13 +52,13 @@ SPOODER_ROUGH_TERRAINS_CFG = TerrainGeneratorCfg(
         ),
         "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
             proportion=0.2, 
-            noise_range=(0.005, 0.025),        # 0.5cm to 2.5cm height bumps (must be multiple of vertical_scale)
-            noise_step=0.005,                  # 0.5cm noise step (avoid ZeroDivisionError)
+            noise_range=(0.005, 0.025),        # 0.5cm to 2.5cm height bumps
+            noise_step=0.005,                  # 0.5cm noise step
             border_width=0.25
         ),
         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
             proportion=0.1, 
-            slope_range=(0.0, 0.15),           # Up to 15% slope (was 40%)
+            slope_range=(0.0, 0.15),           # Up to 15% slope
             platform_width=2.0, 
             border_width=0.25
         ),
@@ -71,34 +70,6 @@ SPOODER_ROUGH_TERRAINS_CFG = TerrainGeneratorCfg(
         ),
     },
 )
-
-
-# --- Custom Reward Functions ---
-
-def stance_feet_contact_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
-    """Rewards keeping stationary/support legs down on the floor to prevent floating."""
-    # Net vertical contact forces on the 6 feet (shape: num_envs, 6)
-    # sensor named "contact_forces" tracks contacts for the entire articulation
-    # but we filter vertical force components (Z-axis is index 2)
-    foot_forces = env.scene.sensors["contact_forces"].data.net_forces_w[:, :, 2]
-
-    # Count feet with firm contact (force > 1.0 Newton)
-    in_contact = foot_forces > 1.0
-    num_contacts = torch.sum(in_contact.float(), dim=-1)
-
-    # Check if the robot is standing still (command velocity is zero)
-    commands = env.command_manager.get_command("base_velocity")
-    is_standing = torch.norm(commands[:, 0:2], dim=-1) < 0.1
-
-    # If standing still: reward having all 6 feet on the ground
-    # If walking: reward having at least 3 feet on the ground (tripod gait support phase)
-    reward = torch.where(
-        is_standing,
-        num_contacts / 6.0,
-        torch.clamp(num_contacts, max=3.0) / 3.0
-    )
-
-    return reward
 
 
 # --- Custom Termination Functions ---
@@ -208,25 +179,20 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             },
         }
 
-        # --- Rewards Configuration (Backtracked to original working config) ---
+        # --- Rewards Configuration (EXACT ORIGINAL COMMIT REWARDS) ---
         
-        # 1. Stepping Air Time
-        self.rewards.feet_air_time.params["sensor_cfg"] = SceneEntityCfg("contact_forces", body_names="link_3_step_v1_.*")
+        # Track feet links (link_3_step_v1_1 through link_3_step_v1_6)
+        self.rewards.feet_air_time.params["sensor_cfg"].body_names = "link_3_step_v1_.*"
         self.rewards.feet_air_time.weight = 0.05
         
-        # 2. Undesired contact (legs above feet touching ground)
+        # Undesired contact (legs above feet touching ground: link_2_step_v1_.*)
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = "link_2_step_v1_.*"
         self.rewards.undesired_contacts.weight = -1.0
         
-        # 3. Custom Stance Leg Contact Force Reward (Floating legs prevention)
-        self.rewards.stance_feet_contact = RewTerm(
-            func=stance_feet_contact_reward,
-            weight=1.5
-        )
-        
-        # 4. Locomotion rewards & Penalties
+        # Penalize tilting too much
         self.rewards.flat_orientation_l2.weight = -2.5
-        self.rewards.dof_pos_limits.weight = -10.0
+        
+        # Joint torque and acceleration penalties
         self.rewards.dof_torques_l2.weight = -1.0e-5
         self.rewards.dof_acc_l2.weight = -2.5e-7
         
