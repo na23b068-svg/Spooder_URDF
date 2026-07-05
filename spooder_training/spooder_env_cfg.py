@@ -52,8 +52,8 @@ SPOODER_ROUGH_TERRAINS_CFG = TerrainGeneratorCfg(
         ),
         "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
             proportion=0.2, 
-            noise_range=(0.005, 0.012),        # 0.5cm to 1.2cm height bumps
-            noise_step=0.003, 
+            noise_range=(0.005, 0.025),        # 0.5cm to 2.5cm height bumps (must be multiple of vertical_scale)
+            noise_step=0.005,                  # 0.5cm noise step (avoid ZeroDivisionError)
             border_width=0.25
         ),
         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
