@@ -74,33 +74,30 @@ SPOODER_ROUGH_TERRAINS_CFG = TerrainGeneratorCfg(
 
 # --- Custom Reward Functions ---
 
-def feet_slide_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg) -> torch.Tensor:
-    """Penalizes dragging or sliding feet while in contact with the ground."""
-    contact_sensor = env.scene.sensors[sensor_cfg.name]
-    forces = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :]
-    contacts = torch.norm(forces, dim=-1) > 1.0
-    
-    asset = env.scene[asset_cfg.name]
-    foot_vel = asset.data.body_lin_vel_w[:, sensor_cfg.body_ids, :2]
-    
-    slide_speed = torch.norm(foot_vel, dim=-1) * contacts
-    return torch.sum(slide_speed, dim=-1)
+def stance_feet_contact_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Rewards keeping stationary/support legs down on the floor to prevent floating."""
+    # Net vertical contact forces on the 6 feet (shape: num_envs, 6)
+    # sensor named "contact_forces" tracks contacts for the entire articulation
+    # but we filter vertical force components (Z-axis is index 2)
+    foot_forces = env.scene.sensors["contact_forces"].data.net_forces_w[:, :, 2]
 
+    # Count feet with firm contact (force > 1.0 Newton)
+    in_contact = foot_forces > 1.0
+    num_contacts = torch.sum(in_contact.float(), dim=-1)
 
-def spawn_zone_penalty(env: ManagerBasedRLEnv, scale: float = 2.0) -> torch.Tensor:
-    """Penalizes the robot for staying close to its spawn origin when commanded to walk."""
-    root_pos = env.scene["robot"].data.root_pos_w[:, :2]
-    env_origins = env.scene.env_origins[:, :2]
-    
-    local_pos = root_pos - env_origins
-    distance = torch.norm(local_pos, dim=-1)
-    
-    penalty = torch.exp(-distance * scale)
-    
+    # Check if the robot is standing still (command velocity is zero)
     commands = env.command_manager.get_command("base_velocity")
-    is_walking = torch.norm(commands[:, 0:2], dim=-1) > 0.1
-    
-    return penalty * is_walking.float()
+    is_standing = torch.norm(commands[:, 0:2], dim=-1) < 0.1
+
+    # If standing still: reward having all 6 feet on the ground
+    # If walking: reward having at least 3 feet on the ground (tripod gait support phase)
+    reward = torch.where(
+        is_standing,
+        num_contacts / 6.0,
+        torch.clamp(num_contacts, max=3.0) / 3.0
+    )
+
+    return reward
 
 
 # --- Robot Asset Configuration ---
@@ -184,48 +181,30 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             },
         }
 
-        # --- Rewards Configuration ---
+        # --- Rewards Configuration (Backtracked to original working config) ---
         
         # 1. Stepping Air Time
         self.rewards.feet_air_time.params["sensor_cfg"] = SceneEntityCfg("contact_forces", body_names="link_3_step_v1_.*")
-        self.rewards.feet_air_time.params["threshold"] = 0.2
-        self.rewards.feet_air_time.weight = 0.5
+        self.rewards.feet_air_time.weight = 0.05
         
-        # 2. Feet Sliding Penalty (encourages planting feet firmly)
-        self.rewards.feet_slide = RewTerm(
-            func=feet_slide_penalty,
-            weight=-0.25,
-            params={
-                "sensor_cfg": SceneEntityCfg("contact_forces", body_names="link_3_step_v1_.*"),
-                "asset_cfg": SceneEntityCfg("robot", body_names="link_3_step_v1_.*"),
-            }
-        )
-        
-        # 3. Spawn Zone Penalty (encourages leaving the spawn area)
-        self.rewards.spawn_zone_penalty = RewTerm(
-            func=spawn_zone_penalty,
-            weight=-1.5,
-            params={"scale": 2.0}
-        )
-        
-        # 4. Undesired contact (legs above feet touching ground)
+        # 2. Undesired contact (legs above feet touching ground)
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = "link_2_step_v1_.*"
         self.rewards.undesired_contacts.weight = -1.0
         
-        # 5. Symmetric Gait / Joint Stance Regularization (encourages neat tripod gait)
-        self.rewards.joint_deviation_l1 = RewTerm(
-            func=mdp.joint_deviation_l1,
-            weight=-0.1,
+        # 3. Custom Stance Leg Contact Force Reward (Floating legs prevention)
+        self.rewards.stance_feet_contact = RewTerm(
+            func=stance_feet_contact_reward,
+            weight=1.5
         )
         
-        # 6. Locomotion rewards & Penalties
+        # 4. Locomotion rewards & Penalties
         self.rewards.flat_orientation_l2.weight = -2.5
         self.rewards.dof_pos_limits.weight = -10.0
         self.rewards.dof_torques_l2.weight = -1.0e-5
         self.rewards.dof_acc_l2.weight = -2.5e-7
         
-        # Heavy linear velocity tracking to dominate standing-still alternatives
-        self.rewards.track_lin_vel_xy_exp.weight = 5.0
+        # Forward velocity tracking reward
+        self.rewards.track_lin_vel_xy_exp.weight = 2.0
         self.rewards.track_ang_vel_z_exp.weight = 0.5
         
         # Terminations Overrides
