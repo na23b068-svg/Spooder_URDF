@@ -9,6 +9,7 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.utils import configclass
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import RewardTermCfg as RewTerm, TerminationTermCfg as DoneTerm
+import isaaclab.envs.mdp as mdp
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
 
