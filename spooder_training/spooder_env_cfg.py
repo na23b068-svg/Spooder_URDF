@@ -62,7 +62,7 @@ SPOODER_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.08),  # Spawn height (about 8cm)
+        pos=(0.0, 0.0, 0.10),  # Spawn height (about 10cm)
         joint_pos={
             "Revolute.*": 0.0,  # All 18 joints start at 0.0 radians
         },
