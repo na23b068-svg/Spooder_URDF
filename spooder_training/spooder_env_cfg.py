@@ -116,7 +116,7 @@ SPOODER_CFG = ArticulationCfg(
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=False,
             solver_position_iteration_count=4,
-            solver_velocity_iteration_count=0,
+            solver_velocity_iteration_count=2,
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
@@ -130,10 +130,10 @@ SPOODER_CFG = ArticulationCfg(
     actuators={
         "base_legs": ImplicitActuatorCfg(
             joint_names_expr=["Revolute.*"],
-            effort_limit=100.0,
-            velocity_limit=100.0,
-            stiffness=50.0,
-            damping=1.0,
+            effort_limit=5.0,
+            velocity_limit=20.0,
+            stiffness=5.0,
+            damping=0.25,
         ),
     },
 )
@@ -159,7 +159,7 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # Action scale & Stance Bias Offset
         self.actions.joint_pos.scale = 0.25
-        self.actions.joint_pos.use_default_offset = True
+        #self.actions.joint_pos.use_default_offset = True
 
         # Overrides for Events
         self.events.add_base_mass.params["asset_cfg"].body_names = "base_link"
@@ -182,11 +182,15 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # --- Rewards Configuration (EXACT ORIGINAL COMMIT REWARDS) ---
         
         # Track feet links (link_3_step_v1_1 through link_3_step_v1_6)
-        self.rewards.feet_air_time.params["sensor_cfg"].body_names = "link_3_step_v1_.*"
+        foot_names = [f"link_3_step_v1_{i}" for i in range(1, 7)]
+
+        self.rewards.feet_air_time.params["sensor_cfg"].body_names = foot_names
         self.rewards.feet_air_time.weight = 0.05
         
         # Undesired contact (legs above feet touching ground: link_2_step_v1_.*)
-        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = "link_2_step_v1_.*"
+        leg_names = [f"link_2_step_v1_{i}" for i in range(1, 7)]
+
+        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = leg_names
         self.rewards.undesired_contacts.weight = -1.0
         
         # Penalize tilting too much
