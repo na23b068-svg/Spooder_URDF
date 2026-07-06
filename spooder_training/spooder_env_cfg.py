@@ -2,100 +2,42 @@ import os
 import math
 import torch
 import isaaclab.sim as sim_utils
-import isaaclab.envs.mdp as mdp
-import isaaclab.terrains as terrain_gen
-from isaaclab.terrains.terrain_generator_cfg import TerrainGeneratorCfg
 from isaaclab.assets import ArticulationCfg
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.utils import configclass
 from isaaclab.envs import ManagerBasedRLEnv
 from isaaclab.managers import RewardTermCfg as RewTerm
-from isaaclab.managers import TerminationTermCfg as DoneTerm
-from isaaclab.managers import SceneEntityCfg
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
+# --- Custom Reward Functions ---
 
-# --- Custom Terrain Config for Small Robot (8cm height) ---
-SPOODER_ROUGH_TERRAINS_CFG = TerrainGeneratorCfg(
-    size=(8.0, 8.0),
-    border_width=20.0,
-    num_rows=10,
-    num_cols=20,
-    horizontal_scale=0.1,
-    vertical_scale=0.005,
-    slope_threshold=0.75,
-    use_cache=False,
-    sub_terrains={
-        "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.005, 0.02),   # 0.5cm to 2.0cm step height
-            step_width=0.2,                    # 20cm step width
-            platform_width=3.0,
-            border_width=1.0,
-            holes=False,
-        ),
-        "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
-            proportion=0.2,
-            step_height_range=(0.005, 0.02),
-            step_width=0.2,
-            platform_width=3.0,
-            border_width=1.0,
-            holes=False,
-        ),
-        "boxes": terrain_gen.MeshRandomGridTerrainCfg(
-            proportion=0.2, 
-            grid_width=0.3, 
-            grid_height_range=(0.005, 0.015),   # 0.5cm to 1.5cm box height
-            platform_width=2.0
-        ),
-        "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-            proportion=0.2, 
-            noise_range=(0.005, 0.025),        # 0.5cm to 2.5cm height bumps
-            noise_step=0.005,                  # 0.5cm noise step
-            border_width=0.25
-        ),
-        "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-            proportion=0.1, 
-            slope_range=(0.0, 0.15),           # Up to 15% slope
-            platform_width=2.0, 
-            border_width=0.25
-        ),
-        "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-            proportion=0.1, 
-            slope_range=(0.0, 0.15),
-            platform_width=2.0, 
-            border_width=0.25
-        ),
-    },
-)
+def stance_feet_contact_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Rewards keeping stationary/support legs down on the floor to prevent floating."""
+    # Net vertical contact forces on the 6 feet (shape: num_envs, 6)
+    # sensor named "contact_forces" tracks contacts for the entire articulation
+    # but we filter vertical force components (Z-axis is index 2)
+    foot_forces = env.scene["contact_forces"].data.net_forces_w[:, :, 2]
 
+    # Count feet with firm contact (force > 1.0 Newton)
+    in_contact = foot_forces > 1.0
+    num_contacts = torch.sum(in_contact.float(), dim=-1)
 
-# --- Custom Termination Functions ---
+    # Check if the robot is standing still (command velocity is zero)
+    commands = env.command_manager.get_command("base_velocity")
+    is_standing = torch.norm(commands[:, 0:2], dim=-1) < 0.1
 
-def check_nan_termination(env: ManagerBasedRLEnv) -> torch.Tensor:
-    """Terminates and resets the environment immediately if any physics values blow up to NaN or Inf."""
-    robot = env.scene["robot"]
-    
-    # Check if robot base coordinates or joint positions/velocities are NaN
-    nan_root = torch.isnan(robot.data.root_pos_w).any(dim=-1)
-    nan_joints = torch.isnan(robot.data.joint_pos).any(dim=-1) | torch.isnan(robot.data.joint_vel).any(dim=-1)
-    
-    # Check if robot base coordinates or joint positions/velocities are Inf
-    inf_root = torch.isinf(robot.data.root_pos_w).any(dim=-1)
-    inf_joints = torch.isinf(robot.data.joint_pos).any(dim=-1) | torch.isinf(robot.data.joint_vel).any(dim=-1)
-    
-    nan_or_inf = nan_root | nan_joints | inf_root | inf_joints
-    
-    # Check contact sensor forces for NaN/Inf
-    contact_sensor = env.scene.sensors.get("contact_forces")
-    if contact_sensor is not None:
-        nan_contacts = torch.isnan(contact_sensor.data.net_forces_w).any(dim=-1).any(dim=-1)
-        inf_contacts = torch.isinf(contact_sensor.data.net_forces_w).any(dim=-1).any(dim=-1)
-        nan_or_inf |= nan_contacts | inf_contacts
-        
-    return nan_or_inf
+    # If standing still: reward having all 6 feet on the ground
+    # If walking: reward having at least 3 feet on the ground (tripod gait support phase)
+    reward = torch.where(
+        is_standing,
+        num_contacts / 6.0,
+        torch.clamp(num_contacts, max=3.0) / 3.0
+    )
+
+    return reward
 
 
 # --- Robot Asset Configuration ---
@@ -116,11 +58,11 @@ SPOODER_CFG = ArticulationCfg(
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
             enabled_self_collisions=False,
             solver_position_iteration_count=4,
-            solver_velocity_iteration_count=2,
+            solver_velocity_iteration_count=0,
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.09),  # Spawn height adjusted to 9cm to prevent immediate base contact on slopes
+        pos=(0.0, 0.0, 0.08),  # Spawn height (about 8cm)
         joint_pos={
             "Revolute.*": 0.0,  # All 18 joints start at 0.0 radians
         },
@@ -130,10 +72,10 @@ SPOODER_CFG = ArticulationCfg(
     actuators={
         "base_legs": ImplicitActuatorCfg(
             joint_names_expr=["Revolute.*"],
-            effort_limit=5.0,
-            velocity_limit=20.0,
-            stiffness=5.0,
-            damping=0.25,
+            effort_limit=100.0,
+            velocity_limit=100.0,
+            stiffness=50.0,
+            damping=1.0,
         ),
     },
 )
@@ -147,19 +89,16 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # Spawn Spooder robot USD
         self.scene.robot = SPOODER_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        
+
         # Scanner path (base link name is base_link)
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/base_link"
-        
+
         # Configure contact sensors
         self.scene.contact_forces.prim_path = "{ENV_REGEX_NS}/Robot/.*"
-        
-        # Apply the micro-rough terrain generator scaled for Spooder
-        self.scene.terrain.terrain_generator = SPOODER_ROUGH_TERRAINS_CFG
 
         # Action scale & Stance Bias Offset
         self.actions.joint_pos.scale = 0.25
-        #self.actions.joint_pos.use_default_offset = True
+        self.actions.joint_pos.use_default_offset = True
 
         # Overrides for Events
         self.events.add_base_mass.params["asset_cfg"].body_names = "base_link"
@@ -179,45 +118,38 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
             },
         }
 
-        # --- Rewards Configuration (EXACT ORIGINAL COMMIT REWARDS) ---
-        
+        # Rewards Overrides
         # Track feet links (link_3_step_v1_1 through link_3_step_v1_6)
-        foot_names = [f"link_3_step_v1_{i}" for i in range(1, 7)]
-
-        self.rewards.feet_air_time.params["sensor_cfg"].body_names = foot_names
+        self.rewards.feet_air_time.params["sensor_cfg"].body_names = "link_3_step_v1_.*"
         self.rewards.feet_air_time.weight = 0.05
-        
-        # Undesired contact (legs above feet touching ground: link_2_step_v1_.*)
-        leg_names = [f"link_2_step_v1_{i}" for i in range(1, 7)]
 
-        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = leg_names
+        # Undesired contact (legs above feet touching ground: link_2_step_v1_.*)
+        self.rewards.undesired_contacts.params["sensor_cfg"].body_names = "link_2_step_v1_.*"
         self.rewards.undesired_contacts.weight = -1.0
-        
+
         # Penalize tilting too much
         self.rewards.flat_orientation_l2.weight = -2.5
-        
+
+        # Enable Soft Joint Limits Penalty
+        self.rewards.dof_pos_limits.weight = -10.0
+
+        # Custom Stance Leg Contact Force Reward (Floating legs prevention)
+        self.rewards.stance_feet_contact = RewTerm(
+            func=stance_feet_contact_reward,
+            weight=1.5
+        )
+
         # Joint torque and acceleration penalties
         self.rewards.dof_torques_l2.weight = -1.0e-5
         self.rewards.dof_acc_l2.weight = -2.5e-7
-        
+
         # Forward velocity tracking reward
         self.rewards.track_lin_vel_xy_exp.weight = 2.0
         self.rewards.track_ang_vel_z_exp.weight = 0.5
-        
+
         # Terminations Overrides
         # Terminate if the base_link touches the ground
         self.terminations.base_contact.params["sensor_cfg"].body_names = "base_link"
-        
-        # Terminate if the robot falls off the terrain grid cliff (prevents NaN values)
-        self.terminations.height_below_minimum = DoneTerm(
-            func=mdp.root_height_below_minimum,
-            params={"minimum_height": -0.2}
-        )
-        
-        # Terminate if any state explodes to NaN/Inf (prevents numerical instability crashes)
-        self.terminations.nan_check = DoneTerm(
-            func=check_nan_termination
-        )
 
 
 @configclass
@@ -228,38 +160,37 @@ class SpooderFlatEnvCfg(SpooderRoughEnvCfg):
         # change terrain to flat plane
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
-        
+
         # no height scan needed for flat terrain
         self.scene.height_scanner = None
         self.observations.policy.height_scan = None
-        
+
         # no terrain curriculum
         self.curriculum.terrain_levels = None
 
 
 @configclass
 class SpooderFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
-    num_steps_per_env = 128  # 128 steps per rollout (~5s iteration time for stable walking trajectories)
-    max_iterations = 1500
+    num_steps_per_env = 128
+    max_iterations = 1000
     save_interval = 50
     experiment_name = "spooder_flat"
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
-        noise_std_type="log",
         actor_obs_normalization=False,
         critic_obs_normalization=False,
-        actor_hidden_dims=[512, 256, 128],  # Wider network for processing the 187 height scan dimensions
-        critic_hidden_dims=[512, 256, 128],
+        actor_hidden_dims=[128, 128, 128],
+        critic_hidden_dims=[128, 128, 128],
         activation="elu",
     )
     algorithm = RslRlPpoAlgorithmCfg(
         value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.005,  # Slightly lower entropy for stable convergence
+        entropy_coef=0.01,
         num_learning_epochs=5,
         num_mini_batches=4,
-        learning_rate=5.0e-4,  # Lower learning rate (was 1e-3) to prevent value loss explosion
+        learning_rate=1.0e-3,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
