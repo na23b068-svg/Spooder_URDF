@@ -4,10 +4,15 @@ import sys
 from datetime import datetime
 
 # Add isaaclab scripts directory to sys.path for importing cli_args and utilities
-import isaaclab
-isaaclab_dir = list(isaaclab.__path__)[0]
-isaaclab_root = os.path.abspath(os.path.join(isaaclab_dir, "..", "..", ".."))
-sys.path.append(os.path.join(isaaclab_root, "scripts", "reinforcement_learning", "rsl_rl"))
+possible_paths = [
+    "/home/smeer/Downloads/isaaclab/scripts/reinforcement_learning/rsl_rl",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "isaaclab", "scripts", "reinforcement_learning", "rsl_rl")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "isaaclab", "scripts", "reinforcement_learning", "rsl_rl")),
+]
+for p in possible_paths:
+    if os.path.exists(p):
+        sys.path.append(p)
+        break
 
 from isaaclab.app import AppLauncher
 
@@ -38,12 +43,11 @@ import torch
 from rsl_rl.runners import OnPolicyRunner
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
-from isaaclab.utils.assets import retrieve_file_path
 
-# Import our custom environment configs
-from spooder_env_cfg import SpooderFlatEnvCfg, SpooderRoughEnvCfg, SpooderFlatPPORunnerCfg
+# Import our custom environment config
+from spooder_env_cfg import SpooderFlatEnvCfg, SpooderFlatPPORunnerCfg
 
-# Register both Flat and Rough environments in Gym
+# Register environment in Gym
 gym.register(
     id="Isaac-Velocity-Flat-Spooder-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
@@ -54,26 +58,16 @@ gym.register(
     },
 )
 
-gym.register(
-    id="Isaac-Velocity-Rough-Spooder-v0",
-    entry_point="isaaclab.envs:ManagerBasedRLEnv",
-    disable_env_checker=True,
-    kwargs={
-        "env_cfg_entry_point": SpooderRoughEnvCfg,
-        "rsl_rl_cfg_entry_point": SpooderFlatPPORunnerCfg,
-    },
-)
-
 def main():
-    # parse configuration
-    env_cfg: ManagerBasedRLEnvCfg = gym.spec(args_cli.task).kwargs["env_cfg_entry_point"]()
-    agent_cfg = gym.spec(args_cli.task).kwargs["rsl_rl_cfg_entry_point"]()
+    # Load configs
+    env_cfg = SpooderFlatEnvCfg()
+    agent_cfg = SpooderFlatPPORunnerCfg()
 
-    # Override configurations from CLI
-    if args_cli.max_iterations is not None:
-        agent_cfg.max_iterations = args_cli.max_iterations
+    # Override with command line arguments
     if args_cli.num_envs is not None:
         env_cfg.scene.num_envs = args_cli.num_envs
+    if args_cli.max_iterations is not None:
+        agent_cfg.max_iterations = args_cli.max_iterations
     if args_cli.seed is not None:
         env_cfg.seed = args_cli.seed
         agent_cfg.seed = args_cli.seed
@@ -114,22 +108,8 @@ def main():
     # Create OnPolicy runner
     runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
 
-    # Load checkpoint if resuming
-    if args_cli.resume:
-        if args_cli.checkpoint:
-            resume_path = retrieve_file_path(args_cli.checkpoint)
-        else:
-            from isaaclab_tasks.utils import get_checkpoint_path
-            resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
-        print(f"[INFO] Resuming training from checkpoint: {resume_path}")
-        runner.load(resume_path)
-
     # Start learning
-    num_iterations = agent_cfg.max_iterations
-    if args_cli.resume:
-        num_iterations = max(0, agent_cfg.max_iterations - runner.current_learning_iteration)
-        
-    runner.learn(num_learning_iterations=num_iterations, init_at_random_ep_len=True)
+    runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
 
     # Close environment
     env.close()

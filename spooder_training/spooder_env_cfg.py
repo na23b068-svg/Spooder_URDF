@@ -8,8 +8,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.utils import configclass
 from isaaclab.envs import ManagerBasedRLEnv
-from isaaclab.managers import RewardTermCfg as RewTerm, TerminationTermCfg as DoneTerm
-import isaaclab.envs.mdp as mdp
+from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
 
@@ -21,15 +20,15 @@ def stance_feet_contact_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
     # sensor named "contact_forces" tracks contacts for the entire articulation
     # but we filter vertical force components (Z-axis is index 2)
     foot_forces = env.scene["contact_forces"].data.net_forces_w[:, :, 2]
-
+    
     # Count feet with firm contact (force > 1.0 Newton)
     in_contact = foot_forces > 1.0
     num_contacts = torch.sum(in_contact.float(), dim=-1)
-
+    
     # Check if the robot is standing still (command velocity is zero)
     commands = env.command_manager.get_command("base_velocity")
     is_standing = torch.norm(commands[:, 0:2], dim=-1) < 0.1
-
+    
     # If standing still: reward having all 6 feet on the ground
     # If walking: reward having at least 3 feet on the ground (tripod gait support phase)
     reward = torch.where(
@@ -37,7 +36,7 @@ def stance_feet_contact_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
         num_contacts / 6.0,
         torch.clamp(num_contacts, max=3.0) / 3.0
     )
-
+    
     return reward
 
 
@@ -63,7 +62,8 @@ SPOODER_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.10),  # Spawn height (about 10cm)
+        pos=(0.0, 0.0, 0.08),  # Spawn height (about 8cm)
+        # Symmetrical design stance (Request 1 & 2):
         joint_pos={
             "Revolute.*": 0.0,  # All 18 joints start at 0.0 radians
         },
@@ -90,18 +90,18 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
 
         # Spawn Spooder robot USD
         self.scene.robot = SPOODER_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-
+        
         # Scanner path (base link name is base_link)
         self.scene.height_scanner.prim_path = "{ENV_REGEX_NS}/Robot/base_link"
-
+        
         # Configure contact sensors
         self.scene.contact_forces.prim_path = "{ENV_REGEX_NS}/Robot/.*"
 
-        # Action scale & Stance Bias Offset
+        # Action scale & Stance Bias Offset (Request 1)
         self.actions.joint_pos.scale = 0.25
         self.actions.joint_pos.use_default_offset = True
 
-        # Overrides for Events
+        # Overrides for Events (Friction and base mass randomizations are already active)
         self.events.add_base_mass.params["asset_cfg"].body_names = "base_link"
         self.events.add_base_mass.params["mass_distribution_params"] = (-0.1, 0.3)
         self.events.base_external_force_torque.params["asset_cfg"].body_names = "base_link"
@@ -123,40 +123,34 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Track feet links (link_3_step_v1_1 through link_3_step_v1_6)
         self.rewards.feet_air_time.params["sensor_cfg"].body_names = "link_3_step_v1_.*"
         self.rewards.feet_air_time.weight = 0.05
-
+        
         # Undesired contact (legs above feet touching ground: link_2_step_v1_.*)
         self.rewards.undesired_contacts.params["sensor_cfg"].body_names = "link_2_step_v1_.*"
         self.rewards.undesired_contacts.weight = -1.0
-
+        
         # Penalize tilting too much
         self.rewards.flat_orientation_l2.weight = -2.5
-
-        # Enable Soft Joint Limits Penalty
+        
+        # Enable Soft Joint Limits Penalty (Request 3)
         self.rewards.dof_pos_limits.weight = -10.0
-
+        
         # Custom Stance Leg Contact Force Reward (Floating legs prevention)
         self.rewards.stance_feet_contact = RewTerm(
             func=stance_feet_contact_reward,
             weight=1.5
         )
-
+        
         # Joint torque and acceleration penalties
         self.rewards.dof_torques_l2.weight = -1.0e-5
         self.rewards.dof_acc_l2.weight = -2.5e-7
-
+        
         # Forward velocity tracking reward
         self.rewards.track_lin_vel_xy_exp.weight = 2.0
         self.rewards.track_ang_vel_z_exp.weight = 0.5
-
+        
         # Terminations Overrides
         # Terminate if the base_link touches the ground
         self.terminations.base_contact.params["sensor_cfg"].body_names = "base_link"
-
-        # Terminate if the robot flips upside down (tilted more than 60 degrees)
-        self.terminations.bad_orientation = DoneTerm(
-            func=mdp.bad_orientation,
-            params={"limit_angle": math.radians(60.0)}
-        )
 
 
 @configclass
@@ -167,11 +161,11 @@ class SpooderFlatEnvCfg(SpooderRoughEnvCfg):
         # change terrain to flat plane
         self.scene.terrain.terrain_type = "plane"
         self.scene.terrain.terrain_generator = None
-
+        
         # no height scan needed for flat terrain
         self.scene.height_scanner = None
         self.observations.policy.height_scan = None
-
+        
         # no terrain curriculum
         self.curriculum.terrain_levels = None
 
