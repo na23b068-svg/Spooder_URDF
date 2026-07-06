@@ -151,6 +151,12 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Terminate if the base_link touches the ground
         self.terminations.base_contact.params["sensor_cfg"].body_names = "base_link"
 
+        # Terminate if the robot flips upside down (tilted more than 60 degrees)
+        self.terminations.bad_orientation = DoneTerm(
+            func=mdp.bad_orientation,
+            params={"limit_angle": math.radians(60.0)}
+        )
+
 
 @configclass
 class SpooderFlatEnvCfg(SpooderRoughEnvCfg):
