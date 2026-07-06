@@ -8,7 +8,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.utils import configclass
 from isaaclab.envs import ManagerBasedRLEnv
-from isaaclab.managers import RewardTermCfg as RewTerm
+from isaaclab.managers import RewardTermCfg as RewTerm, TerminationTermCfg as DoneTerm
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
 
