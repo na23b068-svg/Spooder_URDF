@@ -45,9 +45,9 @@ from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
 
 # Import our custom environment config
-from spooder_env_cfg import SpooderFlatEnvCfg, SpooderFlatPPORunnerCfg
+from spooder_env_cfg import SpooderFlatEnvCfg, SpooderFlatPPORunnerCfg, SpooderRoughEnvCfg, SpooderRoughPPORunnerCfg
 
-# Register environment in Gym
+# Register environments in Gym
 gym.register(
     id="Isaac-Velocity-Flat-Spooder-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
@@ -58,10 +58,24 @@ gym.register(
     },
 )
 
+gym.register(
+    id="Isaac-Velocity-Rough-Spooder-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": SpooderRoughEnvCfg,
+        "rsl_rl_cfg_entry_point": SpooderRoughPPORunnerCfg,
+    },
+)
+
 def main():
-    # Load configs
-    env_cfg = SpooderFlatEnvCfg()
-    agent_cfg = SpooderFlatPPORunnerCfg()
+    # Load configs dynamically based on task
+    if "Flat" in args_cli.task:
+        env_cfg = SpooderFlatEnvCfg()
+        agent_cfg = SpooderFlatPPORunnerCfg()
+    else:
+        env_cfg = SpooderRoughEnvCfg()
+        agent_cfg = SpooderRoughPPORunnerCfg()
 
     # Override with command line arguments
     if args_cli.num_envs is not None:
