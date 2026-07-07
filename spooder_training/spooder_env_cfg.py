@@ -40,6 +40,14 @@ def stance_feet_contact_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
     return reward
 
 
+def track_lin_vel_x_exp_reward(env: ManagerBasedRLEnv, std: float, command_name: str = "base_velocity") -> torch.Tensor:
+    """Reward tracking of linear velocity commands (x-axis/forward only) using exponential kernel."""
+    robot = env.scene["robot"]
+    # Compute error on local X-axis (index 0) only
+    lin_vel_error = torch.square(env.command_manager.get_command(command_name)[:, 0] - robot.data.root_lin_vel_b[:, 0])
+    return torch.exp(-lin_vel_error / std ** 2)
+
+
 # --- Robot Asset Configuration ---
 
 SPOODER_CFG = ArticulationCfg(
@@ -144,8 +152,13 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.dof_torques_l2.weight = -1.0e-5
         self.rewards.dof_acc_l2.weight = -2.5e-7
         
-        # Forward velocity tracking reward
-        self.rewards.track_lin_vel_xy_exp.weight = 2.0
+        # Forward velocity tracking reward (XY disabled, X-only active)
+        self.rewards.track_lin_vel_xy_exp.weight = 0.0
+        self.rewards.track_lin_vel_x_exp = RewTerm(
+            func=track_lin_vel_x_exp_reward,
+            weight=2.0,
+            params={"std": math.sqrt(0.25)}
+        )
         self.rewards.track_ang_vel_z_exp.weight = 0.5
         
         # Terminations Overrides
