@@ -169,6 +169,7 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.observations.policy.joint_pos = None      # No joint position encoders
         self.observations.policy.joint_vel = None      # No joint velocity encoders
         self.observations.policy.base_lin_vel = None   # No base linear velocity estimation
+        self.observations.policy.height_scan = None    # No height scanning (blind locomotion)
 
 
 @configclass
