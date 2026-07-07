@@ -128,6 +128,7 @@ def main():
     obs = env.get_observations()
 
     # Play loop
+    step_count = 0
     while simulation_app.is_running():
         start_time = time.time()
         with torch.inference_mode():
@@ -135,6 +136,10 @@ def main():
             obs, _, dones, _ = env.step(actions)
             if version.parse(installed_version) >= version.parse("4.0.0"):
                 policy.reset(dones)
+        
+        step_count += 1
+        if step_count % 10 == 0:
+            print(f"🔄 Loop Running - Step: {step_count} | Actions Mean: {actions.mean().item():.4f} | Resets: {dones.sum().item()}")
         
         # Real-time synchronization
         sleep_time = dt - (time.time() - start_time)
