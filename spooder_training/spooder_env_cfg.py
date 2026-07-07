@@ -165,6 +165,11 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Terminate if the base_link touches the ground
         self.terminations.base_contact.params["sensor_cfg"].body_names = "base_link"
 
+        # Remove encoder feedback and linear velocity tracking to train an IMU-only policy
+        self.observations.policy.joint_pos = None      # No joint position encoders
+        self.observations.policy.joint_vel = None      # No joint velocity encoders
+        self.observations.policy.base_lin_vel = None   # No base linear velocity estimation
+
 
 @configclass
 class SpooderFlatEnvCfg(SpooderRoughEnvCfg):
