@@ -84,6 +84,8 @@ def main():
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else 16
     env_cfg.scene.env_spacing = 2.5
     env_cfg.observations.policy.enable_corruption = False
+    # Force USD rendering instead of Fabric to ensure meshes move in visualizer
+    env_cfg.sim.use_fabric = False
 
     # Override with command line arguments
     if args_cli.seed is not None:

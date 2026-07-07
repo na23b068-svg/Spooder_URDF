@@ -46,9 +46,9 @@ from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
 from isaaclab.utils.assets import retrieve_file_path
 
 # Import our custom environment config
-from spooder_env_cfg import SpooderFlatEnvCfg, SpooderFlatPPORunnerCfg
+from spooder_env_cfg import SpooderFlatEnvCfg, SpooderFlatPPORunnerCfg, SpooderRoughEnvCfg, SpooderRoughPPORunnerCfg
 
-# Register environment in Gym
+# Register environments in Gym
 gym.register(
     id="Isaac-Velocity-Flat-Spooder-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
@@ -59,17 +59,33 @@ gym.register(
     },
 )
 
+gym.register(
+    id="Isaac-Velocity-Rough-Spooder-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": SpooderRoughEnvCfg,
+        "rsl_rl_cfg_entry_point": SpooderRoughPPORunnerCfg,
+    },
+)
+
 def main():
     installed_version = metadata.version("rsl-rl-lib")
 
-    # Load configs
-    env_cfg = SpooderFlatEnvCfg()
-    agent_cfg = SpooderFlatPPORunnerCfg()
+    # Load configs dynamically based on task
+    if "Flat" in args_cli.task:
+        env_cfg = SpooderFlatEnvCfg()
+        agent_cfg = SpooderFlatPPORunnerCfg()
+    else:
+        env_cfg = SpooderRoughEnvCfg()
+        agent_cfg = SpooderRoughPPORunnerCfg()
 
     # Smaller scene settings for play
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else 16
     env_cfg.scene.env_spacing = 2.5
     env_cfg.observations.policy.enable_corruption = False
+    # Force USD rendering instead of Fabric to ensure meshes move in visualizer
+    env_cfg.sim.use_fabric = False
 
     # Override with command line arguments
     if args_cli.seed is not None:
