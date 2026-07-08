@@ -40,6 +40,14 @@ def stance_feet_contact_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
     return reward
 
 
+def track_lin_vel_x_exp_reward(env: ManagerBasedRLEnv, std: float, command_name: str = "base_velocity") -> torch.Tensor:
+    """Reward tracking of linear velocity commands (x-axis/forward only) using exponential kernel."""
+    robot = env.scene["robot"]
+    # Compute error on local X-axis (index 0) only
+    lin_vel_error = torch.square(env.command_manager.get_command(command_name)[:, 0] - robot.data.root_lin_vel_b[:, 0])
+    return torch.exp(-lin_vel_error / std ** 2)
+
+
 # --- Robot Asset Configuration ---
 
 SPOODER_CFG = ArticulationCfg(
@@ -144,13 +152,24 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         self.rewards.dof_torques_l2.weight = -1.0e-5
         self.rewards.dof_acc_l2.weight = -2.5e-7
         
-        # Forward velocity tracking reward
-        self.rewards.track_lin_vel_xy_exp.weight = 2.0
+        # Forward velocity tracking reward (XY disabled, X-only active)
+        self.rewards.track_lin_vel_xy_exp.weight = 0.0
+        self.rewards.track_lin_vel_x_exp = RewTerm(
+            func=track_lin_vel_x_exp_reward,
+            weight=2.0,
+            params={"std": math.sqrt(0.25)}
+        )
         self.rewards.track_ang_vel_z_exp.weight = 0.5
         
         # Terminations Overrides
         # Terminate if the base_link touches the ground
         self.terminations.base_contact.params["sensor_cfg"].body_names = "base_link"
+
+        # Remove encoder feedback and linear velocity tracking to train an IMU-only policy
+        self.observations.policy.joint_pos = None      # No joint position encoders
+        self.observations.policy.joint_vel = None      # No joint velocity encoders
+        self.observations.policy.base_lin_vel = None   # No base linear velocity estimation
+        self.observations.policy.height_scan = None    # No height scanning (blind locomotion)
 
 
 @configclass
@@ -198,3 +217,9 @@ class SpooderFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+
+
+@configclass
+class SpooderRoughPPORunnerCfg(SpooderFlatPPORunnerCfg):
+    experiment_name = "spooder_rough"
+
