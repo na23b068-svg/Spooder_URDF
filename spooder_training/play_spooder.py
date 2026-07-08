@@ -46,7 +46,7 @@ from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
 from isaaclab.utils.assets import retrieve_file_path
 
 # Import our custom environment config
-import spooder_env_cfg
+from spooder_env_cfg import SpooderFlatEnvCfg, SpooderFlatPPORunnerCfg, SpooderRoughEnvCfg, SpooderRoughPPORunnerCfg
 
 # Register environments in Gym
 gym.register(
@@ -54,35 +54,31 @@ gym.register(
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": getattr(spooder_env_cfg, "SpooderFlatEnvCfg"),
-        "rsl_rl_cfg_entry_point": getattr(spooder_env_cfg, "SpooderFlatPPORunnerCfg"),
+        "env_cfg_entry_point": SpooderFlatEnvCfg,
+        "rsl_rl_cfg_entry_point": SpooderFlatPPORunnerCfg,
     },
 )
 
-try:
-    gym.register(
-        id="Isaac-Velocity-Rough-Spooder-v0",
-        entry_point="isaaclab.envs:ManagerBasedRLEnv",
-        disable_env_checker=True,
-        kwargs={
-            "env_cfg_entry_point": getattr(spooder_env_cfg, "SpooderRoughEnvCfg"),
-            "rsl_rl_cfg_entry_point": getattr(spooder_env_cfg, "SpooderRoughPPORunnerCfg"),
-        },
-    )
-except AttributeError:
-    # Quietly ignore if rough configs are not present in this backup run
-    pass
+gym.register(
+    id="Isaac-Velocity-Rough-Spooder-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": SpooderRoughEnvCfg,
+        "rsl_rl_cfg_entry_point": SpooderRoughPPORunnerCfg,
+    },
+)
 
 def main():
     installed_version = metadata.version("rsl-rl-lib")
 
     # Load configs dynamically based on task
     if "Flat" in args_cli.task:
-        env_cfg = getattr(spooder_env_cfg, "SpooderFlatEnvCfg")()
-        agent_cfg = getattr(spooder_env_cfg, "SpooderFlatPPORunnerCfg")()
+        env_cfg = SpooderFlatEnvCfg()
+        agent_cfg = SpooderFlatPPORunnerCfg()
     else:
-        env_cfg = getattr(spooder_env_cfg, "SpooderRoughEnvCfg")()
-        agent_cfg = getattr(spooder_env_cfg, "SpooderRoughPPORunnerCfg")()
+        env_cfg = SpooderRoughEnvCfg()
+        agent_cfg = SpooderRoughPPORunnerCfg()
 
     # Smaller scene settings for play
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else 16
@@ -132,7 +128,6 @@ def main():
     obs = env.get_observations()
 
     # Play loop
-    step_count = 0
     while simulation_app.is_running():
         start_time = time.time()
         with torch.inference_mode():
@@ -140,10 +135,6 @@ def main():
             obs, _, dones, _ = env.step(actions)
             if version.parse(installed_version) >= version.parse("4.0.0"):
                 policy.reset(dones)
-        
-        step_count += 1
-        if step_count % 10 == 0:
-            print(f"🔄 Loop Running - Step: {step_count} | Actions Mean: {actions.mean().item():.4f} | Resets: {dones.sum().item()}")
         
         # Real-time synchronization
         sleep_time = dt - (time.time() - start_time)
