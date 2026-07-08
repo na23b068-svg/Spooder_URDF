@@ -46,7 +46,7 @@ from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
 from isaaclab.utils.assets import retrieve_file_path
 
 # Import our custom environment config
-from spooder_env_cfg import SpooderFlatEnvCfg, SpooderFlatPPORunnerCfg, SpooderRoughEnvCfg, SpooderRoughPPORunnerCfg
+import spooder_env_cfg
 
 # Register environments in Gym
 gym.register(
@@ -54,31 +54,35 @@ gym.register(
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": SpooderFlatEnvCfg,
-        "rsl_rl_cfg_entry_point": SpooderFlatPPORunnerCfg,
+        "env_cfg_entry_point": getattr(spooder_env_cfg, "SpooderFlatEnvCfg"),
+        "rsl_rl_cfg_entry_point": getattr(spooder_env_cfg, "SpooderFlatPPORunnerCfg"),
     },
 )
 
-gym.register(
-    id="Isaac-Velocity-Rough-Spooder-v0",
-    entry_point="isaaclab.envs:ManagerBasedRLEnv",
-    disable_env_checker=True,
-    kwargs={
-        "env_cfg_entry_point": SpooderRoughEnvCfg,
-        "rsl_rl_cfg_entry_point": SpooderRoughPPORunnerCfg,
-    },
-)
+try:
+    gym.register(
+        id="Isaac-Velocity-Rough-Spooder-v0",
+        entry_point="isaaclab.envs:ManagerBasedRLEnv",
+        disable_env_checker=True,
+        kwargs={
+            "env_cfg_entry_point": getattr(spooder_env_cfg, "SpooderRoughEnvCfg"),
+            "rsl_rl_cfg_entry_point": getattr(spooder_env_cfg, "SpooderRoughPPORunnerCfg"),
+        },
+    )
+except AttributeError:
+    # Quietly ignore if rough configs are not present in this backup run
+    pass
 
 def main():
     installed_version = metadata.version("rsl-rl-lib")
 
     # Load configs dynamically based on task
     if "Flat" in args_cli.task:
-        env_cfg = SpooderFlatEnvCfg()
-        agent_cfg = SpooderFlatPPORunnerCfg()
+        env_cfg = getattr(spooder_env_cfg, "SpooderFlatEnvCfg")()
+        agent_cfg = getattr(spooder_env_cfg, "SpooderFlatPPORunnerCfg")()
     else:
-        env_cfg = SpooderRoughEnvCfg()
-        agent_cfg = SpooderRoughPPORunnerCfg()
+        env_cfg = getattr(spooder_env_cfg, "SpooderRoughEnvCfg")()
+        agent_cfg = getattr(spooder_env_cfg, "SpooderRoughPPORunnerCfg")()
 
     # Smaller scene settings for play
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else 16
