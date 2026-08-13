@@ -5,11 +5,14 @@ from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.utils import configclass
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import LocomotionVelocityRoughEnvCfg
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg
+from isaaclab.envs import ManagerBasedRLEnv
+from isaaclab.utils.math import quat_rotate_inverse
+
 
 # Robot asset configuration
 SPOODER_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
-        usd_path="/home/smeer/Downloads/spooder_training/spooder.usd",
+        usd_path="/home/smeer/Downloads/Spooder_URDF-main/spooder.usd",
         activate_contact_sensors=True,
         rigid_props=sim_utils.RigidBodyPropertiesCfg(
             disable_gravity=False,
@@ -49,6 +52,19 @@ SPOODER_CFG = ArticulationCfg(
 class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
     def __post_init__(self):
         super().__post_init__()
+
+        commands = self.command_manager.get_command("base_velocity")
+
+        v_world = torch.zeros((self.num_envs, 3), device=self.device)
+        v_world[:, 0] = 1.0
+
+        v_body = quat_rotate_inverse(self.robot.data.root_quat_w, v_world)
+
+        commands[:, 0] = v_body[:, 0]
+        commands[:, 1] = v_body[:, 1]
+        commands[:, 2] = 0.0
+        
+        self.scene.num_envs = 1024
 
         # Spawn Spooder robot USD
         self.scene.robot = SPOODER_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
@@ -98,7 +114,7 @@ class SpooderRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         
         # Forward velocity tracking reward
         self.rewards.track_lin_vel_xy_exp.weight = 2.0
-        self.rewards.track_ang_vel_z_exp.weight = 0.5
+        self.rewards.track_ang_vel_z_exp.weight = 2.0
         
         # Terminations Overrides
         # Terminate if the base_link touches the ground
@@ -120,6 +136,7 @@ class SpooderFlatEnvCfg(SpooderRoughEnvCfg):
         
         # no terrain curriculum
         self.curriculum.terrain_levels = None
+        
 
 
 @configclass
@@ -150,3 +167,8 @@ class SpooderFlatPPORunnerCfg(RslRlOnPolicyRunnerCfg):
         desired_kl=0.01,
         max_grad_norm=1.0,
     )
+
+@configclass
+class SpooderRoughPPORunnerCfg(SpooderFlatPPORunnerCfg):
+    experiment_name = "spooder_rough"
+    max_iterations = 5000
