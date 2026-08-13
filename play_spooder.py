@@ -38,7 +38,7 @@ from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
 from isaaclab.utils.assets import retrieve_file_path
 
 # Import our custom environment config
-from spooder_env_cfg import SpooderFlatEnvCfg, SpooderFlatPPORunnerCfg, SpooderRoughEnvCfg, SpooderRoughPPORunnerCfg
+from spooder_env_cfg import SpooderFlatEnvCfg, SpooderFlatPPORunnerCfg
 
 # Register environment in Gym
 gym.register(
@@ -51,26 +51,12 @@ gym.register(
     },
 )
 
-gym.register(
-    id="Isaac-Velocity-Rough-Spooder-v0",
-    entry_point="isaaclab.envs:ManagerBasedRLEnv",
-    disable_env_checker=True,
-    kwargs={
-        "env_cfg_entry_point": SpooderRoughEnvCfg,
-        "rsl_rl_cfg_entry_point": SpooderRoughPPORunnerCfg,
-    },
-)
-
 def main():
     installed_version = metadata.version("rsl-rl-lib")
 
     # Load configs
-    if args_cli.task == "Isaac-Velocity-Rough-Spooder-v0":
-        env_cfg = SpooderRoughEnvCfg()
-        agent_cfg = SpooderRoughPPORunnerCfg()
-    else:
-        env_cfg = SpooderFlatEnvCfg()
-        agent_cfg = SpooderFlatPPORunnerCfg()
+    env_cfg = SpooderFlatEnvCfg()
+    agent_cfg = SpooderFlatPPORunnerCfg()
 
     # Smaller scene settings for play
     env_cfg.scene.num_envs = args_cli.num_envs if args_cli.num_envs is not None else 16

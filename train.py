@@ -37,7 +37,7 @@ from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper, handle_deprecated_rsl_rl_cfg
 
 # Import our custom environment config
-from spooder_env_cfg import SpooderFlatEnvCfg, SpooderFlatPPORunnerCfg, SpooderRoughEnvCfg, SpooderRoughPPORunnerCfg
+from spooder_env_cfg import SpooderFlatEnvCfg, SpooderFlatPPORunnerCfg
 
 # Register environment in Gym
 gym.register(
@@ -50,24 +50,10 @@ gym.register(
     },
 )
 
-gym.register(
-    id="Isaac-Velocity-Rough-Spooder-v0",
-    entry_point="isaaclab.envs:ManagerBasedRLEnv",
-    disable_env_checker=True,
-    kwargs={
-        "env_cfg_entry_point": SpooderRoughEnvCfg,
-        "rsl_rl_cfg_entry_point": SpooderRoughPPORunnerCfg,
-    },
-)
-
 def main():
-
-    if args_cli.task == "Isaac-Velocity-Rough-Spooder-v0":
-        env_cfg = SpooderRoughEnvCfg()
-        agent_cfg = SpooderRoughPPORunnerCfg()
-    else:
-        env_cfg = SpooderFlatEnvCfg()
-        agent_cfg = SpooderFlatPPORunnerCfg()
+    # Load configs
+    env_cfg = SpooderFlatEnvCfg()
+    agent_cfg = SpooderFlatPPORunnerCfg()
 
     # Override with command line arguments
     if args_cli.num_envs is not None:
@@ -78,9 +64,6 @@ def main():
         env_cfg.seed = args_cli.seed
         agent_cfg.seed = args_cli.seed
     
-    # Propagate run name to agent configuration before converting/deprecating
-    agent_cfg.run_name = args_cli.run_name
-    
     env_cfg.sim.device = args_cli.device if args_cli.device is not None else env_cfg.sim.device
 
     # Handle deprecated RSL-RL configurations (converts 'policy' to 'actor' and 'critic')
@@ -89,15 +72,11 @@ def main():
     agent_cfg = handle_deprecated_rsl_rl_cfg(agent_cfg, installed_version)
 
     # Setup logging directory inside our local folder
-
     log_root_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "rsl_rl", agent_cfg.experiment_name)
-
-    run_name = agent_cfg.run_name.strip() if agent_cfg.run_name else ""
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    log_dir = f"{run_name}_{timestamp}" if run_name else timestamp
-
+    log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    if agent_cfg.run_name:
+        log_dir += f"_{agent_cfg.run_name}"
     log_dir = os.path.join(log_root_path, log_dir)
-
     env_cfg.log_dir = log_dir
 
     print(f"[INFO] Logging experiment in directory: {log_dir}")
@@ -106,14 +85,14 @@ def main():
     env = gym.make(args_cli.task, cfg=env_cfg)
 
     # Wrap for video recording if specified
-    #if args_cli.video:
-        #video_kwargs = {
-            #"video_folder": os.path.join(log_dir, "videos", "train"),
-            #"step_trigger": lambda step: step % args_cli.video_interval == 0,
-            #"video_length": args_cli.video_length,
-           #"disable_logger": True,
-        #}
-        #env = gym.wrappers.RecordVideo(env, **video_kwargs)
+    if args_cli.video:
+        video_kwargs = {
+            "video_folder": os.path.join(log_dir, "videos", "train"),
+            "step_trigger": lambda step: step % args_cli.video_interval == 0,
+            "video_length": args_cli.video_length,
+            "disable_logger": True,
+        }
+        env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
     # Wrap for RSL-RL
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
