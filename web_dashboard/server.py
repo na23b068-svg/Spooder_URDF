@@ -39,8 +39,10 @@ class RPiPCA9685:
         off_tick = int(pulse_us * 4096 / 20000)
         
         reg = 0x06 + (4 * channel)
-        # Single burst I2C write (4x faster than 4 separate byte writes)
-        self.bus.write_i2c_block_data(self.address, reg, [0, 0, off_tick & 0xFF, (off_tick >> 8) & 0xFF])
+        self.bus.write_byte_data(self.address, reg, 0)
+        self.bus.write_byte_data(self.address, reg + 1, 0)
+        self.bus.write_byte_data(self.address, reg + 2, off_tick & 0xFF)
+        self.bus.write_byte_data(self.address, reg + 3, (off_tick >> 8) & 0xFF)
 
 class SpooderServer:
     def __init__(self):
