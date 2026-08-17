@@ -12,10 +12,43 @@ LEG_COXA_CHANNELS = [0, 2, 11, 6, 8, 10]
 LEG_FEMUR_CHANNELS = [1, 3, 5, 7, 9, 4]
 FEMUR_LIFT_DIRS = [1, 1, 1, -1, -1, -1]
 
+try:
+    import smbus2 as smbus
+except ImportError:
+    try:
+        import smbus
+    except ImportError:
+        smbus = None
+
+class RPiPCA9685:
+    def __init__(self, bus_num=1, address=0x40):
+        self.bus = smbus.SMBus(bus_num)
+        self.address = address
+        # Reset MODE1
+        self.bus.write_byte_data(self.address, 0x00, 0x00)
+        time.sleep(0.01)
+        # Set 50Hz Prescale (121 = 0x79)
+        self.bus.write_byte_data(self.address, 0x00, 0x10) # Enter sleep to set prescale
+        self.bus.write_byte_data(self.address, 0xFE, 121)   # PRESCALE 50Hz
+        self.bus.write_byte_data(self.address, 0x00, 0x20) # Auto-increment mode
+        time.sleep(0.01)
+
+    def set_angle(self, channel, angle):
+        angle = max(0, min(180, angle))
+        pulse_us = 500 + (angle / 180.0) * 2000
+        off_tick = int(pulse_us * 4096 / 20000)
+        
+        reg = 0x06 + (4 * channel)
+        self.bus.write_byte_data(self.address, reg, 0)
+        self.bus.write_byte_data(self.address, reg + 1, 0)
+        self.bus.write_byte_data(self.address, reg + 2, off_tick & 0xFF)
+        self.bus.write_byte_data(self.address, reg + 3, (off_tick >> 8) & 0xFF)
+
 class SpooderServer:
     def __init__(self):
         self.ser = None
-        self.connect_serial()
+        self.pca = None
+        self.init_hardware()
         
         self.servo_offsets = {i: 0 for i in range(12)}
         
@@ -35,22 +68,37 @@ class SpooderServer:
         
         self.connected_clients = set()
         
-    def connect_serial(self):
+    def init_hardware(self):
+        # 1. Try Direct RPi I2C
+        if smbus is not None:
+            try:
+                self.pca = RPiPCA9685(bus_num=1, address=0x40)
+                print("[RPi Direct I2C] Connected directly to PCA9685 at 0x40 on /dev/i2c-1!")
+                return
+            except Exception as e:
+                print(f"[RPi Direct I2C] Could not open /dev/i2c-1: {e}")
+
+        # 2. Fallback to USB Serial (Arduino)
         ports = serial.tools.list_ports.comports()
         for port in ports:
             if "ttyUSB" in port.device or "ttyACM" in port.device or "CH340" in port.description:
                 try:
                     self.ser = serial.Serial(port.device, 115200, timeout=1)
                     print(f"Connected to Arduino on {port.device}")
-                    # Wait for boot
                     time.sleep(2)
                     return
                 except Exception as e:
                     print(f"Failed to connect to {port.device}: {e}")
-        print("Could not find Arduino. Running in simulation mode.")
+                    
+        print("Running in simulation mode (no hardware detected).")
 
     def send_command(self, channel, angle):
-        if self.ser and self.ser.is_open:
+        if self.pca:
+            try:
+                self.pca.set_angle(channel, angle)
+            except Exception as e:
+                print(f"I2C write error: {e}")
+        elif self.ser and self.ser.is_open:
             command = f"{channel}:{angle}\n"
             try:
                 self.ser.write(command.encode('utf-8'))
