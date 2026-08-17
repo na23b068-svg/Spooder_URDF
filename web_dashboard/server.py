@@ -168,6 +168,9 @@ class SpooderServer:
             theta = (omega * t) % (2.0 * math.pi)
             
             for leg in range(6):
+                if leg == 5:
+                    continue  # Temporarily disable Leg 5 motions during gait maneuvers
+                    
                 if leg in [0, 4, 2]:
                     theta_leg = theta
                 else:
