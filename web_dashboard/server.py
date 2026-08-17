@@ -39,10 +39,8 @@ class RPiPCA9685:
         off_tick = int(pulse_us * 4096 / 20000)
         
         reg = 0x06 + (4 * channel)
-        self.bus.write_byte_data(self.address, reg, 0)
-        self.bus.write_byte_data(self.address, reg + 1, 0)
-        self.bus.write_byte_data(self.address, reg + 2, off_tick & 0xFF)
-        self.bus.write_byte_data(self.address, reg + 3, (off_tick >> 8) & 0xFF)
+        # Single burst I2C write (4x faster than 4 separate byte writes)
+        self.bus.write_i2c_block_data(self.address, reg, [0, 0, off_tick & 0xFF, (off_tick >> 8) & 0xFF])
 
 class SpooderServer:
     def __init__(self):
@@ -67,6 +65,7 @@ class SpooderServer:
         self.pose_active = False
         
         self.connected_clients = set()
+        self._broadcast_task = None
         
     def init_hardware(self):
         # 1. Try Direct RPi I2C
@@ -104,6 +103,19 @@ class SpooderServer:
                 self.ser.write(command.encode('utf-8'))
             except Exception as e:
                 print(f"Serial write error: {e}")
+
+    async def broadcast_state(self):
+        if not self.connected_clients:
+            return
+        if self._broadcast_task and not self._broadcast_task.done():
+            return
+        
+        async def _send():
+            state = {"type": "state", "offsets": self.servo_offsets}
+            message = json.dumps(state)
+            await asyncio.gather(*[client.send(message) for client in self.connected_clients], return_exceptions=True)
+            
+        self._broadcast_task = asyncio.create_task(_send())
 
     def stop_all_motions(self):
         self.gait_active = False
