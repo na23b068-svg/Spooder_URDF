@@ -188,9 +188,7 @@ class SpooderServer:
                 self.servo_offsets[femur_ch] = int(lift * femur_dir)
 
                 self.send_command(coxa_ch, coxa_angle)
-                await asyncio.sleep(0.001)
                 self.send_command(femur_ch, femur_angle)
-                await asyncio.sleep(0.001)
                 
             await self.broadcast_state()
             await asyncio.sleep(0.03)
