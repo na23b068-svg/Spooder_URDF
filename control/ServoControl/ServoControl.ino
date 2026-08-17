@@ -80,12 +80,6 @@ void loop() {
           // Validate angle range (0 to 180 degrees)
           if (angle >= 0 && angle <= 180) {
             setServoAngle(channel, angle);
-            
-            // Send back acknowledgment message
-            Serial.print("ACK ");
-            Serial.print(channel);
-            Serial.print(":");
-            Serial.println(angle);
           } else {
             Serial.println("ERR: Angle out of bounds (0-180)");
           }

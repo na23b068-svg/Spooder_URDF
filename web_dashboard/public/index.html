@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spooder Web Telemetry</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Load Three.js and STLLoader from CDN -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div class="layout">
+        <aside class="sidebar left-sidebar" id="left-sidebar">
+            <!-- Left Legs (0, 1, 2) -->
+        </aside>
+
+        <main class="main-content">
+            <div id="canvas-container">
+                <!-- 3D Viewer will attach here -->
+                <div class="hud">
+                    <span id="connection-status" class="status-disconnected">Disconnected</span>
+                    <button id="btn-reset-cam">Reset View</button>
+                    <button id="btn-center-all">Center All Servos</button>
+                </div>
+                <div class="hud-sens">
+                    <label>Scroll Sens: <span id="val-scroll-sens">5°</span></label>
+                    <input type="range" id="slider-scroll-sens" min="1" max="20" value="5">
+                </div>
+            </div>
+            
+            <div class="controls-panel">
+                <div class="card pose-card">
+                    <h3>System Presets</h3>
+                    <div class="toggle-container">
+                        <span class="toggle-label sit-label">Sit</span>
+                        <label class="switch">
+                            <input type="checkbox" id="pose-toggle">
+                            <span class="slider round"></span>
+                        </label>
+                        <span class="toggle-label stand-label">Stand</span>
+                    </div>
+                    <div class="toggle-container" style="margin-top: 12px;">
+                        <span class="toggle-label crouch-off-label active">Crouch OFF</span>
+                        <label class="switch">
+                            <input type="checkbox" id="crouch-toggle">
+                            <span class="slider round"></span>
+                        </label>
+                        <span class="toggle-label crouch-on-label">Crouch ON</span>
+                    </div>
+                </div>
+
+                <div class="card sweep-card">
+                    <h3>Sweep Test</h3>
+                    <div class="input-group">
+                        <label>Mode</label>
+                        <select id="sweep-mode">
+                            <option value="one-by-one">One-by-One</option>
+                            <option value="all">All Servos</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>Speed</label>
+                        <input type="range" id="sweep-speed" min="0.1" max="2.0" step="0.1" value="1.0">
+                    </div>
+                    <button id="btn-sweep-toggle" class="btn">Start Sweep</button>
+                </div>
+                
+                <div class="card gait-card">
+                    <h3>Tripod Gait</h3>
+                    <div class="input-group">
+                        <label>Speed</label>
+                        <input type="range" id="gait-speed" min="0.1" max="3.0" step="0.1" value="1.0">
+                    </div>
+                    <div class="input-group">
+                        <label>Sweep Amp</label>
+                        <input type="range" id="gait-sweep" min="10" max="60" step="1" value="30">
+                    </div>
+                    <div class="input-group">
+                        <label>Lift Amp</label>
+                        <input type="range" id="gait-lift" min="10" max="60" step="1" value="30">
+                    </div>
+                    <div class="input-group">
+                        <label>Direction</label>
+                        <select id="gait-direction">
+                            <option>Forward</option>
+                            <option>Backward</option>
+                            <option>Turn Left</option>
+                            <option>Turn Right</option>
+                        </select>
+                    </div>
+                    <button id="btn-gait-toggle" class="btn">Start Gait</button>
+                </div>
+            </div>
+        </main>
+
+        <aside class="sidebar right-sidebar" id="right-sidebar">
+            <!-- Right Legs (3, 4, 5) -->
+        </aside>
+    </div>
+
+    <!-- Templates for Leg Cards (will be injected by JS) -->
+    <template id="leg-card-template">
+        <div class="card leg-card">
+            <div class="leg-card-header">
+                <h3 class="leg-title"></h3>
+                <button class="btn-icon btn-leg-center" title="Center Leg Servos">🎯</button>
+            </div>
+            <div class="joint">
+                <label>Coxa (Ch <span class="ch-coxa"></span>): <span class="val-coxa">0°</span></label>
+                <input type="range" class="slider-coxa" min="-45" max="45" value="0">
+            </div>
+            <div class="joint">
+                <label>Femur (Ch <span class="ch-femur"></span>): <span class="val-femur">0°</span></label>
+                <input type="range" class="slider-femur" min="-90" max="45" value="0">
+            </div>
+            <div class="leg-sweep-controls">
+                <button class="btn btn-leg-sweep">Sweep Leg</button>
+                <div class="leg-speed-group">
+                    <label>Spd</label>
+                    <input type="range" class="slider-leg-speed" min="0.2" max="3.0" step="0.1" value="1.0">
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Main Logic -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>
