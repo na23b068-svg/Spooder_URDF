@@ -264,11 +264,25 @@ class SpooderServer:
                 elif cmd == "set_crouch":
                     self.stop_all_motions()
                     active = data.get("active", False)
-                    target_offset = -45 if active else 0
-                    for ch in range(12):
-                        self.servo_offsets[ch] = target_offset
-                        self.send_command(ch, 90 + target_offset)
-                    await self.broadcast_state()
+                    if active:
+                        # OFF to ON: Direct instant jump to -45° for all 12 servos
+                        for ch in range(12):
+                            self.servo_offsets[ch] = -45
+                            self.send_command(ch, 45)
+                        await self.broadcast_state()
+                    else:
+                        # Exit Crouch: Rotate all Coxas back to 0° first (zero vertical load!), then extend Femurs to 0° second
+                        for leg in range(6):
+                            ch = LEG_COXA_CHANNELS[leg]
+                            self.servo_offsets[ch] = 0
+                            self.send_command(ch, 90)
+                        await self.broadcast_state()
+                        await asyncio.sleep(0.08)
+                        for leg in range(6):
+                            ch = LEG_FEMUR_CHANNELS[leg]
+                            self.servo_offsets[ch] = 0
+                            self.send_command(ch, 90)
+                        await self.broadcast_state()
 
                 elif cmd == "center_leg":
                     leg = int(data["leg"])
