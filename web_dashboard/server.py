@@ -139,10 +139,10 @@ class SpooderServer:
             return -1.0 if is_right_side else 1.0
         elif direction == "Backward":
             return 1.0 if is_right_side else -1.0
-        elif direction == "Turn Left":
-            return -1.0 if is_right_side else -1.0
-        elif direction == "Turn Right":
-            return 1.0 if is_right_side else 1.0
+        elif direction in ["Turn Left", "Spin Anti-Clockwise", "Spin Anti-Clockwise (CCW)"]:
+            return -1.0
+        elif direction in ["Turn Right", "Spin Clockwise", "Spin Clockwise (CW)"]:
+            return 1.0
         return 1.0
 
     async def broadcast_state(self):

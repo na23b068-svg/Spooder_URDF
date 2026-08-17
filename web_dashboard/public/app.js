@@ -133,6 +133,19 @@ function initUI() {
         });
     });
 
+    document.getElementById('gait-direction').addEventListener('change', (e) => {
+        if (gaitActive) {
+            sendCommand({
+                type: 'set_gait',
+                active: true,
+                speed: parseFloat(document.getElementById('gait-speed').value),
+                sweep: parseFloat(document.getElementById('gait-sweep').value),
+                lift: parseFloat(document.getElementById('gait-lift').value),
+                direction: e.target.value
+            });
+        }
+    });
+
     document.getElementById('btn-sweep-toggle').addEventListener('click', (e) => {
         sweepActive = !sweepActive;
         resetAllButtons(sweepActive ? e.target : null);
