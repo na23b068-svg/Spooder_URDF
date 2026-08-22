@@ -4,6 +4,18 @@ This repository contains the complete software stack, ROS URDF descriptions, Isa
 
 ---
 
+## 📹 Hardware Demonstration
+
+https://github.com/user-attachments/assets/spooder_demo
+
+> **Physical Hardware Demo:** Watch Spooder execute symmetrical **Sit**, **Stand**, and **Crouch ON/OFF** pose transitions.
+
+<div align="center">
+  <video src="media/Spooder.mp4" width="100%" controls autoplay loop muted></video>
+</div>
+
+---
+
 ## 🚀 Recent Developments & Features
 
 ### 🕸️ Real-Time Web Control Dashboard (`web_dashboard/`)
