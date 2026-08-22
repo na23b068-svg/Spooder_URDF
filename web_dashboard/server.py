@@ -1,3 +1,4 @@
+import os
 import asyncio
 import websockets
 import serial
@@ -51,6 +52,8 @@ class SpooderServer:
         self.init_hardware()
         
         self.servo_offsets = {i: 0 for i in range(12)}
+        self.servo_trim_offsets = {i: 0 for i in range(12)}
+        self.load_calibration()
         
         # State
         self.gait_active = False
@@ -68,6 +71,24 @@ class SpooderServer:
         
         self.connected_clients = set()
         self._broadcast_task = None
+
+    def load_calibration(self):
+        try:
+            if os.path.exists("trim_calibration.json"):
+                with open("trim_calibration.json", "r") as f:
+                    data = json.load(f)
+                    self.servo_trim_offsets = {int(k): int(v) for k, v in data.items()}
+                print(f"[Calibration] Loaded trim offsets: {self.servo_trim_offsets}")
+        except Exception as e:
+            print(f"[Calibration] Error loading calibration: {e}")
+
+    def save_calibration(self):
+        try:
+            with open("trim_calibration.json", "w") as f:
+                json.dump(self.servo_trim_offsets, f, indent=2)
+            print(f"[Calibration] Saved trim offsets to trim_calibration.json: {self.servo_trim_offsets}")
+        except Exception as e:
+            print(f"[Calibration] Error saving calibration: {e}")
         
     def init_hardware(self):
         # 1. Try Direct RPi I2C
@@ -94,13 +115,16 @@ class SpooderServer:
         print("Running in simulation mode (no hardware detected).")
 
     def send_command(self, channel, angle):
+        trimmed_angle = angle + self.servo_trim_offsets.get(channel, 0)
+        trimmed_angle = max(0, min(180, trimmed_angle))
+        
         if self.pca:
             try:
-                self.pca.set_angle(channel, angle)
+                self.pca.set_angle(channel, trimmed_angle)
             except Exception as e:
                 print(f"I2C write error: {e}")
         elif self.ser and self.ser.is_open:
-            command = f"{channel}:{angle}\n"
+            command = f"{channel}:{trimmed_angle}\n"
             try:
                 self.ser.write(command.encode('utf-8'))
             except Exception as e:
@@ -313,6 +337,14 @@ class SpooderServer:
                 elif cmd == "center_all":
                     self.stop_all_motions()
                     self.center_all()
+                    await self.broadcast_state()
+                    
+                elif cmd == "recalibrate":
+                    self.stop_all_motions()
+                    for ch in range(12):
+                        self.servo_trim_offsets[ch] += self.servo_offsets[ch]
+                        self.servo_offsets[ch] = 0
+                    self.save_calibration()
                     await self.broadcast_state()
                     
                 elif cmd == "set_pose":

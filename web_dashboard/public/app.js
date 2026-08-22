@@ -113,6 +113,11 @@ function initUI() {
         sendCommand({ type: 'center_all' });
     });
     
+    document.getElementById('btn-recalibrate').addEventListener('click', () => {
+        resetAllButtons(null);
+        sendCommand({ type: 'recalibrate' });
+    });
+    
     document.getElementById('btn-reset-cam').addEventListener('click', () => {
         centerCamera();
     });
