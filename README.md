@@ -1,78 +1,119 @@
-# Spooder URDF Description & Reinforcement Learning Package
+# Spooder Hexapod: URDF Description, IsaacLab RL & Web Telemetry Dashboard
 
-This repository contains the ROS description files and IsaacLab reinforcement learning workspace for the **Spooder** hexapod robot.
-
-## Repository Structure
-
-* **`Spooder_Files/`**: Renamed ROS URDF package folder.
-  * **`urdf/`**: Robot description file (`spooder_URDF_try1.urdf`), materials, transmissions, and Gazebo definitions.
-  * **`meshes/`**: STL mesh files for visual and collision properties.
-  * **`launch/`**: Launch configurations for RViz and Gazebo.
-  * **`CMakeLists.txt`** & **`package.xml`**: ROS package configuration.
-* **`spooder_training/`**: IsaacLab RL workspace.
-  * **`spooder_env_cfg.py`**: Custom environment configurations including rewards (e.g. stance-contact support, soft joint limits), actions, events, and terminations.
-  * **`train.py`**: PPO training runner.
-  * **`play_spooder.py`**: Policy playback and visualization script.
-  * **`spooder.usd`**: Converted NVIDIA OpenUSD model of the robot.
-  * **`logs/`**: Training checkpoints (`.pt` weights) and TensorBoard curves.
+This repository contains the complete software stack, ROS URDF descriptions, IsaacLab reinforcement learning workspace, and real-time Web Telemetry HUD / Control Dashboard for the **Spooder** 12-DOF hexapod robot.
 
 ---
 
-## 🤖 IsaacLab Reinforcement Learning
+## 🚀 Recent Developments & Features
 
-To simulate, train, and run policies, you must have [IsaacLab](https://isaac-sim.github.io/IsaacLab/) installed on your machine.
+### 🕸️ Real-Time Web Control Dashboard (`web_dashboard/`)
+A modern, dark glassmorphic control interface and live 3D telemetry HUD built for both PC and mobile devices.
 
-### 1. View / Play Pre-Trained Walks (GUI Visualization)
-To launch Isaac Sim with the GUI active and watch the pre-trained Spooder policy (`model_999.pt`) walk:
+* **Native Raspberry Pi Hardware I2C Driver:** Direct 400kHz Linux I2C (`/dev/i2c-1`) communication with the PCA9685 16-channel PWM controller for zero-latency servo driving without requiring an external microcontroller. Includes fallback support for Arduino USB serial (`/dev/ttyUSB0` / `/dev/ttyACM0`) and standalone 3D simulation mode.
+* **Live 3D STL URDF Viewer:** Real-time WebGL visualization (powered by Three.js) syncing 3D chassis and leg joint angles with physical robot state.
+* **Persistent Trim Calibration Engine:** Integrated *"Set Zero (Recalibrate)"* feature that bakes manual servo center adjustments into `trim_calibration.json` on disk, preserving custom 90° zero points across reboots.
+* **Multi-Directional Gait Engine:** 60FPS tripod gait controller supporting `Forward`, `Backward`, `Spin Clockwise (CW)`, `Spin Anti-Clockwise (CCW)`, `Turn Left`, and `Turn Right` with live direction switching on the fly.
+* **System Presets & Advanced Pose Engine:**
+  * **SIT / STAND:** Symmetrical 3-pair stance control (-90° femur sit / 0° femur stand).
+  * **CROUCH ON / OFF:** Instant -45° crouch entry and decoupled 2-stage mechanical release for crouch exit (Coxas return to 0° first under zero vertical load, 80ms pause, Femurs extend to 0° second).
+* **Per-Leg Diagnostics & Precision Control:** Per-leg sweep testing, per-leg speed multipliers (0.2x–3.0x), `🎯` symbol leg centering, and mouse-wheel slider control with adjustable HUD scroll sensitivity (1° to 20°).
+
+---
+
+## ⚡ Quick Start: Running Web Dashboard on Raspberry Pi
+
+To deploy only the lightweight control dashboard (~2.5 MB) on your Raspberry Pi over SSH:
+
 ```bash
-# Navigate to the training directory
-cd spooder_training
+# 1. Download and enter web_dashboard
+mkdir -p ~/spooder_dashboard && cd ~/spooder_dashboard
+curl -L https://github.com/na23b068-svg/Spooder_URDF/archive/refs/heads/main.tar.gz | tar -xz --strip-components=1 Spooder_URDF-main/web_dashboard
+cd web_dashboard
 
-# Run the playback script using the IsaacLab launcher script
-/path/to/your/isaaclab/isaaclab.sh -p play_spooder.py --checkpoint logs/rsl_rl/spooder_flat/2026-07-05_01-54-46/model_999.pt
+# 2. Enable RPi Hardware I2C and install dependencies
+sudo raspi-config nonint do_i2c 0
+sudo apt update && sudo apt install -y python3-websockets python3-serial python3-smbus
+
+# 3. Start the Dashboard (Frontend + Backend)
+chmod +x start.sh && ./start.sh
 ```
 
-### 2. View Training Results & Curves (TensorBoard)
-To view learning curves, rewards, and gait metrics:
-```bash
-# Navigate to training directory
-cd spooder_training
+Open **`http://<rpi-ip-address>:8080`** (or `http://spooder.local:8080`) in your browser!
 
-# Run TensorBoard inside the IsaacLab environment
-/path/to/your/isaaclab/isaaclab.sh -p -m tensorboard.main --logdir=logs/rsl_rl/spooder_flat
+---
+
+## ⚡ Hardware Architecture & Power Specifications
+
+* **Servo Controller:** PCA9685 16-Channel 12-bit PWM Driver over I2C (`0x40`).
+* **Power Supply & Regulation:** 12V 5A SMPS connected to an **XL4016E1 / XH-M404 10A DC-DC Buck Converter** set to 5.2V.
+* **Power Distribution & Protection:** 18 AWG flexible silicone power wiring, DEGSON DG128 7.5mm 20A Screw Terminals, and a **3900µF / 4700µF Low-ESR Electrolytic Capacitor (Nippon Chemi-Con KYB 21mΩ)** directly across the 5.2V rail to absorb 7.2A 12-servo peak inrush current surges.
+* **Microcontroller Upgrade Path:** Firmware architecture ready for **STM32F411CEU6 Black Pill (100MHz ARM Cortex-M4)** with ST-Link V2 debugging, DMA I2C/UART, and FreeRTOS.
+
+---
+
+## 🤖 IsaacLab Reinforcement Learning (`spooder_training/`)
+
+Requires [IsaacLab](https://isaac-sim.github.io/IsaacLab/) installed.
+
+### 1. View / Play Pre-Trained Policy (GUI Visualization)
+```bash
+cd spooder_training
+/path/to/isaaclab/isaaclab.sh -p play_spooder.py --checkpoint logs/rsl_rl/spooder_flat/2026-07-05_01-54-46/model_999.pt
 ```
-Open `http://localhost:6006` in your web browser.
 
-### 3. Start a New Training Session
-To launch PPO training from scratch (headless mode):
+### 2. View Training Results (TensorBoard)
 ```bash
-# Navigate to training directory
 cd spooder_training
+/path/to/isaaclab/isaaclab.sh -p -m tensorboard.main --logdir=logs/rsl_rl/spooder_flat
+```
+Open `http://localhost:6006` in browser.
 
-# Start training with 512 environment instances
-DISPLAY="" /path/to/your/isaaclab/isaaclab.sh -p train.py --task Isaac-Velocity-Flat-Spooder-v0 --headless --num_envs 512
+### 3. Start PPO Training Session
+```bash
+cd spooder_training
+DISPLAY="" /path/to/isaaclab/isaaclab.sh -p train.py --task Isaac-Velocity-Flat-Spooder-v0 --headless --num_envs 512
 ```
 
 ---
 
-## ⚙️ ROS Setup and Usage (RViz/Gazebo)
+## ⚙️ ROS Workspace Setup (`Spooder_Files/`)
 
-1. **Place in ROS Workspace**:
-   Clone or copy the `Spooder_Files` directory into the `src/` directory of your ROS workspace (e.g., `~/catkin_ws/src/`).
+1. **Clone to ROS Workspace:**
+   ```bash
+   cd ~/catkin_ws/src/
+   git clone https://github.com/na23b068-svg/Spooder_URDF.git
+   ```
 
-2. **Build the Workspace**:
+2. **Build and Source:**
    ```bash
    cd ~/catkin_ws
    catkin_make
    source devel/setup.bash
    ```
 
-3. **Launch in RViz**:
+3. **Launch RViz / Gazebo:**
    ```bash
-   roslaunch Spooder_Files display.launch
+   roslaunch Spooder_Files display.launch   # RViz visualization
+   roslaunch Spooder_Files gazebo.launch    # Gazebo simulation
    ```
 
-4. **Launch in Gazebo**:
-   ```bash
-   roslaunch Spooder_Files gazebo.launch
-   ```
+---
+
+## 📁 Repository Structure
+
+```
+├── web_dashboard/           # Web Control Dashboard & Telemetry HUD
+│   ├── server.py            # RPi Direct I2C & WebSocket Server
+│   ├── start.sh             # 1-click startup script (Frontend + Backend)
+│   └── public/              # HTML5, CSS3, JS, Three.js 3D STL Models
+├── spooder_training/        # IsaacLab PPO Reinforcement Learning Workspace
+│   ├── spooder_env_cfg.py   # Gym environment rewards, terminations, actions
+│   ├── train.py             # PPO training runner
+│   ├── play_spooder.py      # Policy playback runner
+│   └── logs/                # Checkpoints & TensorBoard curves
+├── Spooder_Files/           # ROS URDF Package
+│   ├── urdf/                # Robot URDF description
+│   ├── meshes/              # STL meshes for visual & collision
+│   └── launch/              # RViz & Gazebo launch files
+└── README.md                # Project documentation
+```
