@@ -45,6 +45,61 @@ class RPiPCA9685:
         self.bus.write_byte_data(self.address, reg + 2, off_tick & 0xFF)
         self.bus.write_byte_data(self.address, reg + 3, (off_tick >> 8) & 0xFF)
 
+class TrapezoidalProfile:
+    """
+    Generates a 1D Trapezoidal/Triangular Velocity Motion Profile.
+    Ramps velocity up (acceleration), holds constant velocity, and ramps velocity down (deceleration).
+    """
+    def __init__(self, start_pos, target_pos, max_v=180.0, max_a=360.0):
+        self.start_pos = float(start_pos)
+        self.target_pos = float(target_pos)
+        self.delta = self.target_pos - self.start_pos
+        self.dist = abs(self.delta)
+        self.direction = 1.0 if self.delta >= 0 else -1.0
+        
+        if self.dist < 1e-3:
+            self.total_time = 0.0
+            return
+            
+        t_a = max_v / max_a
+        s_a = max_a * (t_a ** 2)
+        
+        if self.dist >= s_a:
+            # Trapezoidal profile
+            self.t_acc = t_a
+            self.t_flat = (self.dist - s_a) / max_v
+            self.t_dec = t_a
+            self.v_peak = max_v
+        else:
+            # Triangular profile
+            self.v_peak = math.sqrt(self.dist * max_a)
+            self.t_acc = self.v_peak / max_a
+            self.t_flat = 0.0
+            self.t_dec = self.t_acc
+            
+        self.max_a = max_a
+        self.total_time = self.t_acc + self.t_flat + self.t_dec
+
+    def get_position(self, t):
+        if self.dist < 1e-3 or t <= 0.0:
+            return self.start_pos
+        if t >= self.total_time:
+            return self.target_pos
+            
+        if t <= self.t_acc:
+            # Acceleration phase
+            s = 0.5 * self.max_a * (t ** 2)
+        elif t <= (self.t_acc + self.t_flat):
+            # Constant velocity phase
+            s_acc = 0.5 * self.max_a * (self.t_acc ** 2)
+            s = s_acc + self.v_peak * (t - self.t_acc)
+        else:
+            # Deceleration phase
+            t_rem = self.total_time - t
+            s = self.dist - 0.5 * self.max_a * (t_rem ** 2)
+            
+        return self.start_pos + self.direction * s
+
 class SpooderServer:
     def __init__(self):
         self.ser = None
@@ -143,6 +198,52 @@ class SpooderServer:
             
         self._broadcast_task = asyncio.create_task(_send())
 
+    async def animate_trapezoidal_targets(self, target_offsets_dict, max_v=180.0, max_a=360.0, dt=0.015):
+        """
+        Smoothly moves one or multiple servos to target offsets using a Trapezoidal/Triangular Velocity Profile.
+        All servos in the target dictionary are time-synchronized to finish their movement at the exact same moment.
+        """
+        profiles = {}
+        max_duration = 0.0
+        
+        for ch, target_off in target_offsets_dict.items():
+            start_off = self.servo_offsets[ch]
+            prof = TrapezoidalProfile(start_off, target_off, max_v=max_v, max_a=max_a)
+            profiles[ch] = prof
+            if prof.total_time > max_duration:
+                max_duration = prof.total_time
+                
+        if max_duration < 1e-3:
+            for ch, target_off in target_offsets_dict.items():
+                self.servo_offsets[ch] = target_off
+                self.send_command(ch, 90 + target_off)
+            await self.broadcast_state()
+            return
+
+        t = 0.0
+        start_time = time.time()
+        
+        while t < max_duration:
+            t = time.time() - start_time
+            if t > max_duration:
+                t = max_duration
+                
+            for ch, prof in profiles.items():
+                scale = prof.total_time / max_duration if max_duration > 0 else 1.0
+                t_scaled = t * scale
+                current_off = int(prof.get_position(t_scaled))
+                self.servo_offsets[ch] = current_off
+                self.send_command(ch, 90 + current_off)
+                
+            await self.broadcast_state()
+            await asyncio.sleep(dt)
+
+        # Final exact snap to target offsets
+        for ch, target_off in target_offsets_dict.items():
+            self.servo_offsets[ch] = target_off
+            self.send_command(ch, 90 + target_off)
+        await self.broadcast_state()
+
     def stop_all_motions(self):
         self.gait_active = False
         self.sweep_active = False
@@ -151,10 +252,8 @@ class SpooderServer:
             self.leg_sweeps[i] = False
 
     def center_all(self):
-        for ch in range(12):
-            self.servo_offsets[ch] = 0
-            self.send_command(ch, 90)
-            time.sleep(0.005)
+        targets = {ch: 0 for ch in range(12)}
+        asyncio.create_task(self.animate_trapezoidal_targets(targets, max_v=240.0, max_a=480.0))
     
     def get_coxa_multiplier(self, leg_index, direction):
         is_right_side = leg_index in [3, 4, 5]
@@ -168,16 +267,6 @@ class SpooderServer:
         elif direction in ["Turn Right", "Spin Clockwise", "Spin Clockwise (CW)"]:
             return 1.0
         return 1.0
-
-    async def broadcast_state(self):
-        if not self.connected_clients:
-            return
-        state = {
-            "type": "state",
-            "offsets": self.servo_offsets
-        }
-        message = json.dumps(state)
-        await asyncio.gather(*[client.send(message) for client in self.connected_clients], return_exceptions=True)
 
     async def run_gait(self):
         t = 0.0
@@ -348,44 +437,34 @@ class SpooderServer:
                     self.stop_all_motions()
                     pose = data.get("pose")
                     target_femur_offset = -90 if pose == "sit" else 0
-                    for ch in LEG_FEMUR_CHANNELS:
-                        self.servo_offsets[ch] = target_femur_offset
-                        self.send_command(ch, 90 + target_femur_offset)
-                    await self.broadcast_state()
+                    targets = {ch: target_femur_offset for ch in LEG_FEMUR_CHANNELS}
+                    asyncio.create_task(self.animate_trapezoidal_targets(targets, max_v=240.0, max_a=480.0))
 
                 elif cmd == "set_crouch":
                     self.stop_all_motions()
                     active = data.get("active", False)
                     if active:
-                        # OFF to ON: Direct instant jump to -45° for all 12 servos
-                        for ch in range(12):
-                            self.servo_offsets[ch] = -45
-                            self.send_command(ch, 45)
-                        await self.broadcast_state()
+                        # OFF to ON: Smooth trapezoidal ramp to -45° for all 12 servos
+                        targets = {ch: -45 for ch in range(12)}
+                        asyncio.create_task(self.animate_trapezoidal_targets(targets, max_v=220.0, max_a=440.0))
                     else:
                         # Exit Crouch: Rotate all Coxas back to 0° first (zero vertical load!), then extend Femurs to 0° second
-                        for leg in range(6):
-                            ch = LEG_COXA_CHANNELS[leg]
-                            self.servo_offsets[ch] = 0
-                            self.send_command(ch, 90)
-                        await self.broadcast_state()
-                        await asyncio.sleep(0.08)
-                        for leg in range(6):
-                            ch = LEG_FEMUR_CHANNELS[leg]
-                            self.servo_offsets[ch] = 0
-                            self.send_command(ch, 90)
-                        await self.broadcast_state()
+                        coxa_targets = {LEG_COXA_CHANNELS[leg]: 0 for leg in range(6)}
+                        femur_targets = {LEG_FEMUR_CHANNELS[leg]: 0 for leg in range(6)}
+                        
+                        async def _exit_crouch():
+                            await self.animate_trapezoidal_targets(coxa_targets, max_v=220.0, max_a=440.0)
+                            await asyncio.sleep(0.05)
+                            await self.animate_trapezoidal_targets(femur_targets, max_v=220.0, max_a=440.0)
+                            
+                        asyncio.create_task(_exit_crouch())
 
                 elif cmd == "center_leg":
                     leg = int(data["leg"])
                     coxa_ch = LEG_COXA_CHANNELS[leg]
                     femur_ch = LEG_FEMUR_CHANNELS[leg]
-                    self.servo_offsets[coxa_ch] = 0
-                    self.servo_offsets[femur_ch] = 0
-                    self.send_command(coxa_ch, 90)
-                    await asyncio.sleep(0.001)
-                    self.send_command(femur_ch, 90)
-                    await self.broadcast_state()
+                    targets = {coxa_ch: 0, femur_ch: 0}
+                    asyncio.create_task(self.animate_trapezoidal_targets(targets, max_v=240.0, max_a=480.0))
 
                 elif cmd == "set_leg_sweep":
                     leg = int(data["leg"])
