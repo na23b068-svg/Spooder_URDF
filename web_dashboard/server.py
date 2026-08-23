@@ -40,10 +40,14 @@ class RPiPCA9685:
         off_tick = int(pulse_us * 4096 / 20000)
         
         reg = 0x06 + (4 * channel)
-        self.bus.write_byte_data(self.address, reg, 0)
-        self.bus.write_byte_data(self.address, reg + 1, 0)
-        self.bus.write_byte_data(self.address, reg + 2, off_tick & 0xFF)
-        self.bus.write_byte_data(self.address, reg + 3, (off_tick >> 8) & 0xFF)
+        try:
+            self.bus.write_byte_data(self.address, reg, 0)
+            self.bus.write_byte_data(self.address, reg + 1, 0)
+            self.bus.write_byte_data(self.address, reg + 2, off_tick & 0xFF)
+            self.bus.write_byte_data(self.address, reg + 3, (off_tick >> 8) & 0xFF)
+        except Exception as e:
+            # Catch transient I2C bus glitches (e.g. Remote I/O error) to prevent task crash
+            print(f"[I2C Glitch] Channel {channel}: {e}")
 
 class MotionProfileGenerator:
     """
@@ -305,38 +309,41 @@ class SpooderServer:
         t = 0.0
         last_time = time.time()
         while self.gait_active:
-            current_time = time.time()
-            dt = current_time - last_time
-            last_time = current_time
-            
-            omega = 2.0 * math.pi * self.gait_speed
-            t += dt
-            theta = (omega * t) % (2.0 * math.pi)
-            
-            for leg in range(6):
-                if leg in [0, 4, 2]:
-                    theta_leg = theta
-                else:
-                    theta_leg = theta + math.pi
+            try:
+                current_time = time.time()
+                dt = current_time - last_time
+                last_time = current_time
                 
-                coxa_multiplier = self.get_coxa_multiplier(leg, self.gait_direction)
-                lift = max(0.0, math.sin(theta_leg)) * self.gait_lift
-                sweep = -math.cos(theta_leg) * self.gait_sweep * coxa_multiplier
-                femur_dir = FEMUR_LIFT_DIRS[leg]
+                omega = 2.0 * math.pi * self.gait_speed
+                t += dt
+                theta = (omega * t) % (2.0 * math.pi)
                 
-                coxa_angle = 90 + int(sweep)
-                femur_angle = 90 + int(lift * femur_dir)
-                
-                coxa_ch = LEG_COXA_CHANNELS[leg]
-                femur_ch = LEG_FEMUR_CHANNELS[leg]
-                
-                self.servo_offsets[coxa_ch] = int(sweep)
-                self.servo_offsets[femur_ch] = int(lift * femur_dir)
+                for leg in range(6):
+                    if leg in [0, 4, 2]:
+                        theta_leg = theta
+                    else:
+                        theta_leg = theta + math.pi
+                    
+                    coxa_multiplier = self.get_coxa_multiplier(leg, self.gait_direction)
+                    lift = max(0.0, math.sin(theta_leg)) * self.gait_lift
+                    sweep = -math.cos(theta_leg) * self.gait_sweep * coxa_multiplier
+                    femur_dir = FEMUR_LIFT_DIRS[leg]
+                    
+                    coxa_angle = 90 + int(sweep)
+                    femur_angle = 90 + int(lift * femur_dir)
+                    
+                    coxa_ch = LEG_COXA_CHANNELS[leg]
+                    femur_ch = LEG_FEMUR_CHANNELS[leg]
+                    
+                    self.servo_offsets[coxa_ch] = int(sweep)
+                    self.servo_offsets[femur_ch] = int(lift * femur_dir)
 
-                self.send_command(coxa_ch, coxa_angle)
-                self.send_command(femur_ch, femur_angle)
-                
-            await self.broadcast_state()
+                    self.send_command(coxa_ch, coxa_angle)
+                    self.send_command(femur_ch, femur_angle)
+                    
+                await self.broadcast_state()
+            except Exception as e:
+                print(f"[Gait Loop Exception] Recovered from error: {e}")
             await asyncio.sleep(0.03)
 
     async def run_sweep(self):
