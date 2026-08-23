@@ -108,6 +108,25 @@ function initUI() {
     }
     
     // UI Handlers
+    document.getElementById('select-motion-profile').addEventListener('change', (e) => {
+        sendCommand({
+            type: 'set_motion_profile',
+            profile: e.target.value
+        });
+    });
+
+    const sliderPoseSpeed = document.getElementById('slider-pose-speed');
+    const valPoseSpeed = document.getElementById('val-pose-speed');
+    sliderPoseSpeed.addEventListener('input', (e) => {
+        valPoseSpeed.textContent = parseFloat(e.target.value).toFixed(1) + 'x';
+    });
+    sliderPoseSpeed.addEventListener('change', (e) => {
+        sendCommand({
+            type: 'set_pose_speed',
+            speed: parseFloat(e.target.value)
+        });
+    });
+
     document.getElementById('btn-center-all').addEventListener('click', () => {
         resetAllButtons(null);
         sendCommand({ type: 'center_all' });

@@ -45,60 +45,81 @@ class RPiPCA9685:
         self.bus.write_byte_data(self.address, reg + 2, off_tick & 0xFF)
         self.bus.write_byte_data(self.address, reg + 3, (off_tick >> 8) & 0xFF)
 
-class TrapezoidalProfile:
+class MotionProfileGenerator:
     """
-    Generates a 1D Trapezoidal/Triangular Velocity Motion Profile.
-    Ramps velocity up (acceleration), holds constant velocity, and ramps velocity down (deceleration).
+    Generates time-series position interpolation according to the selected profile:
+    - Trapezoidal (Linear Acceleration Ramp + Coast + Deceleration)
+    - S-Curve (Smooth Cubic Step with zero jerk at start/stop: 3t^2 - 2t^3)
+    - Sinusoidal (Harmonic Wave: 0.5 * (1 - cos(pi * t)))
+    - Instant (Step change)
     """
-    def __init__(self, start_pos, target_pos, max_v=180.0, max_a=360.0):
+    def __init__(self, start_pos, target_pos, profile_type="Trapezoidal", speed_scale=1.0):
         self.start_pos = float(start_pos)
         self.target_pos = float(target_pos)
         self.delta = self.target_pos - self.start_pos
         self.dist = abs(self.delta)
         self.direction = 1.0 if self.delta >= 0 else -1.0
+        self.profile_type = profile_type
         
-        if self.dist < 1e-3:
+        if self.dist < 1e-3 or profile_type == "Instant":
             self.total_time = 0.0
             return
             
-        t_a = max_v / max_a
-        s_a = max_a * (t_a ** 2)
+        speed_scale = max(0.1, min(5.0, float(speed_scale)))
         
-        if self.dist >= s_a:
-            # Trapezoidal profile
-            self.t_acc = t_a
-            self.t_flat = (self.dist - s_a) / max_v
-            self.t_dec = t_a
-            self.v_peak = max_v
-        else:
-            # Triangular profile
-            self.v_peak = math.sqrt(self.dist * max_a)
-            self.t_acc = self.v_peak / max_a
-            self.t_flat = 0.0
-            self.t_dec = self.t_acc
+        if self.profile_type == "Trapezoidal":
+            max_v = 240.0 * speed_scale
+            max_a = 480.0 * speed_scale
+            t_a = max_v / max_a
+            s_a = max_a * (t_a ** 2)
             
-        self.max_a = max_a
-        self.total_time = self.t_acc + self.t_flat + self.t_dec
+            if self.dist >= s_a:
+                self.t_acc = t_a
+                self.t_flat = (self.dist - s_a) / max_v
+                self.t_dec = t_a
+                self.v_peak = max_v
+            else:
+                self.v_peak = math.sqrt(self.dist * max_a)
+                self.t_acc = self.v_peak / max_a
+                self.t_flat = 0.0
+                self.t_dec = self.t_acc
+                
+            self.max_a = max_a
+            self.total_time = self.t_acc + self.t_flat + self.t_dec
+        else: # S-Curve or Sinusoidal
+            base_v = 150.0 * speed_scale
+            self.total_time = max(0.1, self.dist / base_v)
 
     def get_position(self, t):
-        if self.dist < 1e-3 or t <= 0.0:
+        if self.dist < 1e-3 or self.profile_type == "Instant":
+            return self.target_pos
+        if t <= 0.0:
             return self.start_pos
         if t >= self.total_time:
             return self.target_pos
             
-        if t <= self.t_acc:
-            # Acceleration phase
-            s = 0.5 * self.max_a * (t ** 2)
-        elif t <= (self.t_acc + self.t_flat):
-            # Constant velocity phase
-            s_acc = 0.5 * self.max_a * (self.t_acc ** 2)
-            s = s_acc + self.v_peak * (t - self.t_acc)
-        else:
-            # Deceleration phase
-            t_rem = self.total_time - t
-            s = self.dist - 0.5 * self.max_a * (t_rem ** 2)
+        if self.profile_type == "Trapezoidal":
+            if t <= self.t_acc:
+                s = 0.5 * self.max_a * (t ** 2)
+            elif t <= (self.t_acc + self.t_flat):
+                s_acc = 0.5 * self.max_a * (self.t_acc ** 2)
+                s = s_acc + self.v_peak * (t - self.t_acc)
+            else:
+                t_rem = self.total_time - t
+                s = self.dist - 0.5 * self.max_a * (t_rem ** 2)
+            return self.start_pos + self.direction * s
             
-        return self.start_pos + self.direction * s
+        tau = t / self.total_time
+        if self.profile_type == "S-Curve":
+            # Cubic smoothstep: 3*tau^2 - 2*tau^3
+            s_norm = 3.0 * (tau ** 2) - 2.0 * (tau ** 3)
+        elif self.profile_type == "Sinusoidal":
+            # 0.5 * (1 - cos(pi * tau))
+            s_norm = 0.5 * (1.0 - math.cos(math.pi * tau))
+        else:
+            s_norm = 1.0
+            
+        return self.start_pos + self.delta * s_norm
 
 class SpooderServer:
     def __init__(self):
@@ -111,6 +132,8 @@ class SpooderServer:
         self.load_calibration()
         
         # State
+        self.active_motion_profile = "Trapezoidal"
+        self.pose_speed = 1.0
         self.gait_active = False
         self.gait_speed = 1.0
         self.gait_sweep = 30.0
@@ -198,17 +221,27 @@ class SpooderServer:
             
         self._broadcast_task = asyncio.create_task(_send())
 
-    async def animate_trapezoidal_targets(self, target_offsets_dict, max_v=180.0, max_a=360.0, dt=0.015):
+    async def animate_motion_targets(self, target_offsets_dict, dt=0.015):
         """
-        Smoothly moves one or multiple servos to target offsets using a Trapezoidal/Triangular Velocity Profile.
-        All servos in the target dictionary are time-synchronized to finish their movement at the exact same moment.
+        Smoothly moves one or multiple servos to target offsets using the active motion profile (Trapezoidal, S-Curve, Sinusoidal, or Instant).
+        All servos in target_offsets_dict are time-synchronized.
         """
+        profile_type = self.active_motion_profile
+        speed_scale = self.pose_speed
+        
+        if profile_type == "Instant":
+            for ch, target_off in target_offsets_dict.items():
+                self.servo_offsets[ch] = target_off
+                self.send_command(ch, 90 + target_off)
+            await self.broadcast_state()
+            return
+
         profiles = {}
         max_duration = 0.0
         
         for ch, target_off in target_offsets_dict.items():
             start_off = self.servo_offsets[ch]
-            prof = TrapezoidalProfile(start_off, target_off, max_v=max_v, max_a=max_a)
+            prof = MotionProfileGenerator(start_off, target_off, profile_type=profile_type, speed_scale=speed_scale)
             profiles[ch] = prof
             if prof.total_time > max_duration:
                 max_duration = prof.total_time
@@ -253,7 +286,7 @@ class SpooderServer:
 
     def center_all(self):
         targets = {ch: 0 for ch in range(12)}
-        asyncio.create_task(self.animate_trapezoidal_targets(targets, max_v=240.0, max_a=480.0))
+        asyncio.create_task(self.animate_motion_targets(targets))
     
     def get_coxa_multiplier(self, leg_index, direction):
         is_right_side = leg_index in [3, 4, 5]
@@ -433,29 +466,37 @@ class SpooderServer:
                     self.save_calibration()
                     await self.broadcast_state()
                     
+                elif cmd == "set_motion_profile":
+                    self.active_motion_profile = data.get("profile", "Trapezoidal")
+                    print(f"[Motion Profile] Switched active profile to: {self.active_motion_profile}")
+
+                elif cmd == "set_pose_speed":
+                    self.pose_speed = float(data.get("speed", 1.0))
+                    print(f"[Motion Speed] Pose speed multiplier set to: {self.pose_speed}x")
+
                 elif cmd == "set_pose":
                     self.stop_all_motions()
                     pose = data.get("pose")
                     target_femur_offset = -90 if pose == "sit" else 0
                     targets = {ch: target_femur_offset for ch in LEG_FEMUR_CHANNELS}
-                    asyncio.create_task(self.animate_trapezoidal_targets(targets, max_v=240.0, max_a=480.0))
+                    asyncio.create_task(self.animate_motion_targets(targets))
 
                 elif cmd == "set_crouch":
                     self.stop_all_motions()
                     active = data.get("active", False)
                     if active:
-                        # OFF to ON: Smooth trapezoidal ramp to -45° for all 12 servos
+                        # OFF to ON: Smooth motion profile ramp to -45° for all 12 servos
                         targets = {ch: -45 for ch in range(12)}
-                        asyncio.create_task(self.animate_trapezoidal_targets(targets, max_v=220.0, max_a=440.0))
+                        asyncio.create_task(self.animate_motion_targets(targets))
                     else:
                         # Exit Crouch: Rotate all Coxas back to 0° first (zero vertical load!), then extend Femurs to 0° second
                         coxa_targets = {LEG_COXA_CHANNELS[leg]: 0 for leg in range(6)}
                         femur_targets = {LEG_FEMUR_CHANNELS[leg]: 0 for leg in range(6)}
                         
                         async def _exit_crouch():
-                            await self.animate_trapezoidal_targets(coxa_targets, max_v=220.0, max_a=440.0)
+                            await self.animate_motion_targets(coxa_targets)
                             await asyncio.sleep(0.05)
-                            await self.animate_trapezoidal_targets(femur_targets, max_v=220.0, max_a=440.0)
+                            await self.animate_motion_targets(femur_targets)
                             
                         asyncio.create_task(_exit_crouch())
 
@@ -464,7 +505,7 @@ class SpooderServer:
                     coxa_ch = LEG_COXA_CHANNELS[leg]
                     femur_ch = LEG_FEMUR_CHANNELS[leg]
                     targets = {coxa_ch: 0, femur_ch: 0}
-                    asyncio.create_task(self.animate_trapezoidal_targets(targets, max_v=240.0, max_a=480.0))
+                    asyncio.create_task(self.animate_motion_targets(targets))
 
                 elif cmd == "set_leg_sweep":
                     leg = int(data["leg"])
