@@ -1,4 +1,4 @@
-# Spooder Hexapod: URDF Description, IsaacLab RL & Web Telemetry Dashboard
+# Spooder Hexapod: URDF, IsaacLab RL & Web Telemetry Dashboard
 
 This repository contains the complete software stack, ROS URDF descriptions, IsaacLab reinforcement learning workspace, and real-time Web Telemetry HUD / Control Dashboard for the **Spooder** 12-DOF hexapod robot.
 
@@ -16,23 +16,23 @@ https://github.com/user-attachments/assets/spooder_demo
 
 ---
 
-## 🚀 Recent Developments & Features
+## Recent Developments & Features
 
-### 🕸️ Real-Time Web Control Dashboard (`web_dashboard/`)
-A modern, dark glassmorphic control interface and live 3D telemetry HUD built for both PC and mobile devices.
+### Real-Time Web Control Dashboard (`web_dashboard/`)
+A modern control interface and live 3D telemetry dashboard built for PC.
 
-* **Native Raspberry Pi Hardware I2C Driver:** Direct 400kHz Linux I2C (`/dev/i2c-1`) communication with the PCA9685 16-channel PWM controller for zero-latency servo driving without requiring an external microcontroller. Includes fallback support for Arduino USB serial (`/dev/ttyUSB0` / `/dev/ttyACM0`) and standalone 3D simulation mode.
+* **Slider-Control for Joint-Angles**: 12 in Total
 * **Live 3D STL URDF Viewer:** Real-time WebGL visualization (powered by Three.js) syncing 3D chassis and leg joint angles with physical robot state.
-* **Persistent Trim Calibration Engine:** Integrated *"Set Zero (Recalibrate)"* feature that bakes manual servo center adjustments into `trim_calibration.json` on disk, preserving custom 90° zero points across reboots.
-* **Multi-Directional Gait Engine:** 60FPS tripod gait controller supporting `Forward`, `Backward`, `Spin Clockwise (CW)`, `Spin Anti-Clockwise (CCW)`, `Turn Left`, and `Turn Right` with live direction switching on the fly.
-* **System Presets & Advanced Pose Engine:**
+* **Manual Trim, Pitch and Roll Calibration (To be automated soon, using proximity sensors on the base):** *"Set Zero (Recalibrate)"* feature on the dashboard that bakes manual servo center adjustments into `trim_calibration.json` on disk, preserving custom 90° zero points across reboots.
+* **Multi-Directional Gait:** 60FPS tripod gait controller supporting `Forward`, `Backward`, `Spin Clockwise (CW)`, `Spin Anti-Clockwise (CCW)`, `Turn Left`, and `Turn Right`.
+* **System Presets & Poses:**
   * **SIT / STAND:** Symmetrical 3-pair stance control (-90° femur sit / 0° femur stand).
   * **CROUCH ON / OFF:** Instant -45° crouch entry and decoupled 2-stage mechanical release for crouch exit (Coxas return to 0° first under zero vertical load, 80ms pause, Femurs extend to 0° second).
-* **Per-Leg Diagnostics & Precision Control:** Per-leg sweep testing, per-leg speed multipliers (0.2x–3.0x), `🎯` symbol leg centering, and mouse-wheel slider control with adjustable HUD scroll sensitivity (1° to 20°).
+* **Per-Leg Diagnostics & Precision Control:** Per-leg sweep testing, per-leg speed multipliers (0.2x–3.0x), per-leg centering, and mouse-wheel control for joint-angle sliders with adjustable scroll sensitivity (1° to 20° / scroll-angle).
 
 ---
 
-## ⚡ Quick Start: Running Web Dashboard on Raspberry Pi
+## Running Web Dashboard on Raspberry Pi
 
 To deploy only the lightweight control dashboard (~2.5 MB) on your Raspberry Pi over SSH:
 
@@ -54,16 +54,21 @@ Open **`http://<rpi-ip-address>:8080`** (or `http://spooder.local:8080`) in your
 
 ---
 
-## ⚡ Hardware Architecture & Power Specifications
-
+## Hardware Architecture & Power Specifications
+* **Raspberry Pi 4B:** Wireless communication with laptop via SSH and I2C communication with the PCA9685 board  for low-latency servo driving.
 * **Servo Controller:** PCA9685 16-Channel 12-bit PWM Driver over I2C (`0x40`).
-* **Power Supply & Regulation:** 12V 5A SMPS connected to an **XL4016E1 / XH-M404 10A DC-DC Buck Converter** set to 5.2V.
-* **Power Distribution & Protection:** 18 AWG flexible silicone power wiring, DEGSON DG128 7.5mm 20A Screw Terminals, and a **3900µF / 4700µF Low-ESR Electrolytic Capacitor (Nippon Chemi-Con KYB 21mΩ)** directly across the 5.2V rail to absorb 7.2A 12-servo peak inrush current surges.
-* **Microcontroller Upgrade Path:** Firmware architecture ready for **STM32F411CEU6 Black Pill (100MHz ARM Cortex-M4)** with ST-Link V2 debugging, DMA I2C/UART, and FreeRTOS.
+* **Power Supply & Regulation:** 12V 5A SMPS connected to an **XL4016E1 10A DC-DC Buck Converter** set to 5.2V.
+* **Power Distribution & Protection:** 12 AWG wiring, DEGSON DG128 7.5mm 20A Screw Terminals, and a **3900µF / 4700µF Low-ESR Electrolytic Capacitor (Nippon Chemi-Con KYB 21mΩ)** directly across the 5.2V rail to absorb 7.2A 12-servo peak inrush current surges.
+* **Microcontroller Upgrade Path:** Upgrading to a custom-PCB with ESP32 for wireless connectivity / high number of GPIO pins, separate power and ground rails, arranged in a similar 3-pin fashion as the PCA board to allow plug-and-play connectivity of upto 18 servos. 
+* **Other Upgrade Paths:** 
+  * Adding wireless / pogo-pin based charging 
+  * Battery-sizing based on actual recorded current draws over a HIL simulated walking pattern that simulates the bot walking across a 10ft x       10ft room space for at least 1-2 hours. 
+  * BMS for the battery-pack and adding a rectifier circuit / ferrite shielding for the battery to implement a qi wireless charging pad. 
+  * Adding Mapping and Localisation (SLAM) to the bot so that it can dock itself for charging from time-to-time.
 
 ---
 
-## 🤖 IsaacLab Reinforcement Learning (`spooder_training/`)
+## IsaacLab Reinforcement Learning (Yet to reach a proper refined result) (`spooder_training/`)
 
 Requires [IsaacLab](https://isaac-sim.github.io/IsaacLab/) installed.
 
