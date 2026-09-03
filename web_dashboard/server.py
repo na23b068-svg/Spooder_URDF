@@ -325,9 +325,12 @@ class SpooderServer:
                 t += dt
                 theta = (omega * t) % (2.0 * math.pi)
                 
-                femur_baseline = self.crouch_offset if (self.crouch_active or self.crouch_offset != 0) else 0
-                if self.crouch_active and femur_baseline == 0:
+                if self.crouch_offset != 0:
+                    femur_baseline = -abs(self.crouch_offset)
+                elif self.crouch_active:
                     femur_baseline = -45
+                else:
+                    femur_baseline = 0
                 
                 for leg in range(6):
                     if leg in [0, 4, 2]:
@@ -524,7 +527,7 @@ class SpooderServer:
                     self.crouch_offset = offset
 
                     if offset <= 0:
-                        coxa_target = offset
+                        coxa_target = 0
                         femur_target = offset
                     else:
                         coxa_target = offset
