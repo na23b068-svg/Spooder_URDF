@@ -469,13 +469,10 @@ class SpooderServer:
                         if self.gait_active:
                             asyncio.create_task(self.run_gait())
                         else:
-                            if self.crouch_active:
-                                if self.crouch_offset <= 0:
-                                    coxa_target = self.crouch_offset
-                                    femur_target = self.crouch_offset if self.crouch_offset != 0 else -45
-                                else:
-                                    coxa_target = self.crouch_offset
-                                    femur_target = -self.crouch_offset
+                            if self.crouch_active or self.crouch_offset != 0:
+                                offset = self.crouch_offset if self.crouch_offset != 0 else -45
+                                coxa_target = offset
+                                femur_target = -abs(offset)
                                 targets = {}
                                 for leg in range(6):
                                     targets[LEG_COXA_CHANNELS[leg]] = coxa_target
