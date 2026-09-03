@@ -12,6 +12,7 @@ import time
 LEG_COXA_CHANNELS = [0, 2, 11, 6, 8, 10]
 LEG_FEMUR_CHANNELS = [1, 3, 5, 7, 9, 4]
 FEMUR_LIFT_DIRS = [1, 1, 1, -1, -1, -1]
+COXA_DIRS = [1, 1, -1, 1, 1, 1]
 
 try:
     import smbus2 as smbus
@@ -308,16 +309,17 @@ class SpooderServer:
     
     def get_coxa_multiplier(self, leg_index, direction):
         is_right_side = leg_index in [3, 4, 5]
+        coxa_dir = COXA_DIRS[leg_index]
         
         if direction == "Forward":
-            return 1.0
+            return coxa_dir
         elif direction == "Backward":
-            return -1.0
+            return -coxa_dir
         elif direction in ["Turn Left", "Spin Anti-Clockwise", "Spin Anti-Clockwise (CCW)"]:
-            return -1.0 if is_right_side else 1.0
+            return -coxa_dir if is_right_side else coxa_dir
         elif direction in ["Turn Right", "Spin Clockwise", "Spin Clockwise (CW)"]:
-            return 1.0 if is_right_side else -1.0
-        return 1.0
+            return coxa_dir if is_right_side else -coxa_dir
+        return coxa_dir
 
     async def run_gait(self):
         t = 0.0
@@ -475,7 +477,7 @@ class SpooderServer:
                                 femur_target = -abs(offset)
                                 targets = {}
                                 for leg in range(6):
-                                    targets[LEG_COXA_CHANNELS[leg]] = coxa_target
+                                    targets[LEG_COXA_CHANNELS[leg]] = coxa_target * COXA_DIRS[leg]
                                     targets[LEG_FEMUR_CHANNELS[leg]] = femur_target
                                 self._animation_task = asyncio.create_task(self.animate_motion_targets(targets))
                             else:
@@ -545,10 +547,9 @@ class SpooderServer:
                         femur_target = -abs(offset)
 
                         targets = {}
-                        for ch in LEG_COXA_CHANNELS:
-                            targets[ch] = coxa_target
-                        for ch in LEG_FEMUR_CHANNELS:
-                            targets[ch] = femur_target
+                        for leg in range(6):
+                            targets[LEG_COXA_CHANNELS[leg]] = coxa_target * COXA_DIRS[leg]
+                            targets[LEG_FEMUR_CHANNELS[leg]] = femur_target
 
                         if hasattr(self, '_animation_task') and self._animation_task and not self._animation_task.done():
                             self._animation_task.cancel()
