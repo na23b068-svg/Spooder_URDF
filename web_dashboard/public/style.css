@@ -269,6 +269,17 @@ select {
     justify-content: center;
 }
 
+.pose-card .input-group {
+    width: 100%;
+    max-width: 220px;
+}
+
+.pose-card .input-group label {
+    width: 110px;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
 .toggle-container {
     display: flex;
     align-items: center;

@@ -194,15 +194,47 @@ function initUI() {
         document.querySelector('.stand-label').classList.toggle('active', e.target.checked);
     });
 
+    const sliderCrouch = document.getElementById('slider-crouch');
+    const valCrouch = document.getElementById('val-crouch');
+    if (sliderCrouch) {
+        sliderCrouch.addEventListener('input', (e) => {
+            resetAllButtons(null);
+            const val = parseInt(e.target.value);
+            if (valCrouch) {
+                valCrouch.textContent = `${val}°`;
+            }
+            const active = (val !== 0);
+            const crouchToggle = document.getElementById('crouch-toggle');
+            if (crouchToggle) {
+                crouchToggle.checked = active;
+                const offLabel = document.querySelector('.crouch-off-label');
+                const onLabel = document.querySelector('.crouch-on-label');
+                if (offLabel) offLabel.classList.toggle('active', !active);
+                if (onLabel) onLabel.classList.toggle('active', active);
+            }
+            sendCommand({ type: 'set_crouch', cmd: 'set_crouch', offset: val, active: active });
+        });
+    }
+
     const crouchToggle = document.getElementById('crouch-toggle');
     if (crouchToggle) {
         crouchToggle.addEventListener('change', (e) => {
             resetAllButtons(null);
             const active = e.target.checked;
-            sendCommand({ type: 'set_crouch', active });
-            
-            document.querySelector('.crouch-off-label').classList.toggle('active', !active);
-            document.querySelector('.crouch-on-label').classList.toggle('active', active);
+            const val = active ? -45 : 0;
+            const sliderCrouch = document.getElementById('slider-crouch');
+            const valCrouch = document.getElementById('val-crouch');
+            if (sliderCrouch) {
+                sliderCrouch.value = val;
+            }
+            if (valCrouch) {
+                valCrouch.textContent = `${val}°`;
+            }
+            const offLabel = document.querySelector('.crouch-off-label');
+            const onLabel = document.querySelector('.crouch-on-label');
+            if (offLabel) offLabel.classList.toggle('active', !active);
+            if (onLabel) onLabel.classList.toggle('active', active);
+            sendCommand({ type: 'set_crouch', cmd: 'set_crouch', offset: val, active: active });
         });
     }
 
@@ -278,6 +310,24 @@ function initWebSocket() {
                 }
             }
             updateJoints(offsets);
+
+            const sliderCrouch = document.getElementById('slider-crouch');
+            const valCrouch = document.getElementById('val-crouch');
+            const crouchToggle = document.getElementById('crouch-toggle');
+
+            if (data.crouch_offset !== undefined) {
+                const crouchVal = data.crouch_offset;
+                if (sliderCrouch) sliderCrouch.value = crouchVal;
+                if (valCrouch) valCrouch.textContent = `${crouchVal}°`;
+            }
+            if (data.crouch_active !== undefined) {
+                const crouchActive = data.crouch_active;
+                if (crouchToggle) crouchToggle.checked = crouchActive;
+                const offLabel = document.querySelector('.crouch-off-label');
+                const onLabel = document.querySelector('.crouch-on-label');
+                if (offLabel) offLabel.classList.toggle('active', !crouchActive);
+                if (onLabel) onLabel.classList.toggle('active', crouchActive);
+            }
 
             // Sync toggle switch state based on average femur position
             let femurSum = 0;

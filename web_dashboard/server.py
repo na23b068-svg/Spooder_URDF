@@ -143,6 +143,8 @@ class SpooderServer:
         self.gait_sweep = 30.0
         self.gait_lift = 30.0
         self.gait_direction = "Forward"
+        self.crouch_active = False
+        self.crouch_offset = 0
         
         self.sweep_active = False
         self.sweep_speed = 1.0
@@ -219,7 +221,12 @@ class SpooderServer:
             return
         
         async def _send():
-            state = {"type": "state", "offsets": self.servo_offsets}
+            state = {
+                "type": "state",
+                "offsets": self.servo_offsets,
+                "crouch_active": self.crouch_active,
+                "crouch_offset": self.crouch_offset,
+            }
             message = json.dumps(state)
             await asyncio.gather(*[client.send(message) for client in self.connected_clients], return_exceptions=True)
             
@@ -318,6 +325,10 @@ class SpooderServer:
                 t += dt
                 theta = (omega * t) % (2.0 * math.pi)
                 
+                femur_baseline = self.crouch_offset if (self.crouch_active or self.crouch_offset != 0) else 0
+                if self.crouch_active and femur_baseline == 0:
+                    femur_baseline = -45
+                
                 for leg in range(6):
                     if leg in [0, 4, 2]:
                         theta_leg = theta
@@ -330,13 +341,13 @@ class SpooderServer:
                     femur_dir = FEMUR_LIFT_DIRS[leg]
                     
                     coxa_angle = 90 + int(sweep)
-                    femur_angle = 90 + int(lift * femur_dir)
+                    femur_angle = 90 + femur_baseline + int(lift * femur_dir)
                     
                     coxa_ch = LEG_COXA_CHANNELS[leg]
                     femur_ch = LEG_FEMUR_CHANNELS[leg]
                     
                     self.servo_offsets[coxa_ch] = int(sweep)
-                    self.servo_offsets[femur_ch] = int(lift * femur_dir)
+                    self.servo_offsets[femur_ch] = femur_baseline + int(lift * femur_dir)
 
                     self.send_command(coxa_ch, coxa_angle)
                     self.send_command(femur_ch, femur_angle)
@@ -445,7 +456,15 @@ class SpooderServer:
                     if self.gait_active:
                         asyncio.create_task(self.run_gait())
                     else:
-                        self.center_all()
+                        if self.crouch_active:
+                            crouch_baseline = self.crouch_offset if self.crouch_offset != 0 else -45
+                            targets = {}
+                            for leg in range(6):
+                                targets[LEG_COXA_CHANNELS[leg]] = 0
+                                targets[LEG_FEMUR_CHANNELS[leg]] = crouch_baseline
+                            asyncio.create_task(self.animate_motion_targets(targets))
+                        else:
+                            self.center_all()
                         await self.broadcast_state()
                         
                 elif cmd == "set_sweep":
@@ -490,22 +509,34 @@ class SpooderServer:
 
                 elif cmd == "set_crouch":
                     self.stop_all_motions()
-                    active = data.get("active", False)
-                    if active:
-                        # OFF to ON: Smooth motion profile ramp to -45° for all 12 servos
-                        targets = {ch: -45 for ch in range(12)}
-                        asyncio.create_task(self.animate_motion_targets(targets))
+                    raw_active = data.get("active")
+                    raw_offset = data.get("offset")
+
+                    if raw_offset is not None:
+                        offset = int(raw_offset)
+                        active = bool(raw_active) if raw_active is not None else (offset != 0)
                     else:
-                        # Exit Crouch: Rotate all Coxas back to 0° first (zero vertical load!), then extend Femurs to 0° second
-                        coxa_targets = {LEG_COXA_CHANNELS[leg]: 0 for leg in range(6)}
-                        femur_targets = {LEG_FEMUR_CHANNELS[leg]: 0 for leg in range(6)}
-                        
-                        async def _exit_crouch():
-                            await self.animate_motion_targets(coxa_targets)
-                            await asyncio.sleep(0.05)
-                            await self.animate_motion_targets(femur_targets)
-                            
-                        asyncio.create_task(_exit_crouch())
+                        active = bool(raw_active) if raw_active is not None else False
+                        offset = -45 if active else 0
+
+                    offset = max(-45, min(45, offset))
+                    self.crouch_active = active
+                    self.crouch_offset = offset
+
+                    if offset <= 0:
+                        coxa_target = offset
+                        femur_target = offset
+                    else:
+                        coxa_target = offset
+                        femur_target = -offset
+
+                    targets = {}
+                    for ch in LEG_COXA_CHANNELS:
+                        targets[ch] = coxa_target
+                    for ch in LEG_FEMUR_CHANNELS:
+                        targets[ch] = femur_target
+
+                    asyncio.create_task(self.animate_motion_targets(targets))
 
                 elif cmd == "center_leg":
                     leg = int(data["leg"])
