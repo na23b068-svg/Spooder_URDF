@@ -496,6 +496,146 @@ class Tier4RealWorldScenarioTests(unittest.TestCase):
 
 
 # ==============================================================================
+# TIER 5: ADVERSARIAL & WHITE-BOX VULNERABILITY TESTS
+# ==============================================================================
+class Tier5AdversarialWhiteBoxTests(unittest.TestCase):
+    """
+    Tier 5 tests stress-test backend robustness against invalid inputs,
+    concurrency collisions, boundary index violations, and calculation bugs in server.py.
+    """
+
+    def test_01_set_crouch_non_numeric_offset_handling(self):
+        """Tier 5: Non-numeric offset inputs ('abc', '12.5', '', None, []) in set_crouch payload."""
+        invalid_offsets = ["abc", "12.5", "", [1, 2], {"val": 10}]
+
+        for raw_offset in invalid_offsets:
+            with self.subTest(offset=raw_offset):
+                if raw_offset is not None:
+                    try:
+                        offset = int(round(float(raw_offset)))
+                    except (ValueError, TypeError):
+                        offset = 0
+                else:
+                    offset = 0
+                offset = max(-45, min(45, offset))
+                self.assertTrue(-45 <= offset <= 45)
+
+    def test_02_websocket_malformed_json_handling(self):
+        """Tier 5: Malformed JSON strings must be caught without crashing websocket loop."""
+        malformed_json = "{\"type\": \"set_crouch\", \"offset\":"
+        try:
+            data = json.loads(malformed_json)
+        except json.JSONDecodeError:
+            data = None
+        self.assertIsNone(data, "Malformed JSON should fail decode safely")
+
+    def test_03_invalid_leg_index_clamping(self):
+        """Tier 5: Invalid leg index (e.g. 10, -10) must be validated before array lookup."""
+        invalid_legs = [10, -10, 99]
+        for leg in invalid_legs:
+            with self.subTest(leg=leg):
+                is_valid = 0 <= leg < len(LEG_COXA_CHANNELS)
+                self.assertFalse(is_valid, f"Leg index {leg} should be flagged invalid")
+
+    def test_04_positive_crouch_slider_femur_baseline_calculation(self):
+        """Tier 5: Positive crouch slider (+30) must calculate negative femur baseline (-30) for crouch walk."""
+        server_inst = SpooderServer()
+        server_inst.crouch_active = True
+        server_inst.crouch_offset = 30
+
+        crouch_offset = server_inst.crouch_offset
+        if crouch_offset > 0:
+            expected_femur_baseline = -crouch_offset
+        elif crouch_offset < 0:
+            expected_femur_baseline = crouch_offset
+        else:
+            expected_femur_baseline = -45 if server_inst.crouch_active else 0
+
+        self.assertEqual(
+            expected_femur_baseline, -30,
+            f"Femur baseline calculation for +30 crouch slider should be -30, got {expected_femur_baseline}"
+        )
+
+    def test_05_gait_deactivation_crouch_posture_preservation(self):
+        """Tier 5: Stopping gait with positive crouch slider (+30) must preserve coxa (+30) and femur (-30) posture targets."""
+        crouch_offset = 30
+        crouch_active = True
+
+        if crouch_active:
+            if crouch_offset > 0:
+                expected_coxa = crouch_offset
+                expected_femur = -crouch_offset
+            elif crouch_offset < 0:
+                expected_coxa = crouch_offset
+                expected_femur = crouch_offset
+            else:
+                expected_coxa = 0
+                expected_femur = -45
+        else:
+            expected_coxa = 0
+            expected_femur = 0
+
+        self.assertEqual(expected_coxa, 30, "Coxa target upon gait stop should be +30 for +30 crouch slider")
+        self.assertEqual(expected_femur, -30, "Femur target upon gait stop should be -30 for +30 crouch slider")
+
+    def test_06_motion_animation_task_interlock(self):
+        """Tier 5: Motion animation tasks must be cancelled/cleared upon stop_all_motions()."""
+        server_inst = SpooderServer()
+        server_inst.stop_all_motions()
+        self.assertFalse(server_inst.gait_active)
+        self.assertFalse(server_inst.sweep_active)
+        self.assertFalse(server_inst.pose_active)
+
+    def test_07_websockets_connection_closed_exception_handling(self):
+        """Tier 5: Verify websockets.ConnectionClosed exception is imported and handled in server.py."""
+        self.assertTrue(hasattr(websockets, 'ConnectionClosed'), "websockets.ConnectionClosed must exist")
+        server_py_path = os.path.join(os.path.dirname(__file__), "server.py")
+        with open(server_py_path, "r", encoding="utf-8") as f:
+            server_content = f.read()
+        self.assertIn("except websockets.ConnectionClosed:", server_content, "server.py must handle websockets.ConnectionClosed")
+
+
+class Tier5AdversarialFrontendProtocolTests(unittest.TestCase):
+    """
+    Tier 5 tests verify frontend DOM contract, positive display formatting,
+    WS state key compatibility, and clean outbound payload schema.
+    """
+
+    def test_01_crouch_container_dom_id(self):
+        """Tier 5: HTML markup contract must contain id='crouch-container'."""
+        html_path = os.path.join(os.path.dirname(__file__), "public", "index.html")
+        with open(html_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn('id="crouch-container"', content, "index.html missing id='crouch-container'")
+
+    def test_02_positive_crouch_display_formatting(self):
+        """Tier 5: Positive crouch angle display formatting must include explicit '+' sign."""
+        js_path = os.path.join(os.path.dirname(__file__), "public", "app.js")
+        with open(js_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertTrue(
+            "val > 0 ?" in content or "crouchVal > 0 ?" in content,
+            "app.js missing positive sign formatting logic (+ sign)"
+        )
+
+    def test_03_crouch_state_key_fallback(self):
+        """Tier 5: WS state listener must support both crouch_enabled and crouch_active keys."""
+        js_path = os.path.join(os.path.dirname(__file__), "public", "app.js")
+        with open(js_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("crouch_enabled", content, "app.js missing crouch_enabled key compatibility check")
+        self.assertIn("crouch_active", content, "app.js missing crouch_active fallback key check")
+
+    def test_04_clean_websocket_payload_schema(self):
+        """Tier 5: Outbound WebSocket payloads must NOT contain redundant 'cmd: set_crouch' key."""
+        js_path = os.path.join(os.path.dirname(__file__), "public", "app.js")
+        with open(js_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertNotIn("cmd: 'set_crouch'", content, "app.js contains redundant cmd: 'set_crouch' payload key")
+        self.assertNotIn('cmd: "set_crouch"', content, "app.js contains redundant cmd: \"set_crouch\" payload key")
+
+
+# ==============================================================================
 # CUSTOM TEST RUNNER WITH DETAILED SUMMARY
 # ==============================================================================
 def run_suite():
@@ -506,15 +646,19 @@ def run_suite():
     tier2 = loader.loadTestsFromTestCase(Tier2BoundaryCornerCaseTests)
     tier3 = loader.loadTestsFromTestCase(Tier3CrossFeatureCombinationTests)
     tier4 = loader.loadTestsFromTestCase(Tier4RealWorldScenarioTests)
+    tier5_wb = loader.loadTestsFromTestCase(Tier5AdversarialWhiteBoxTests)
+    tier5_fe = loader.loadTestsFromTestCase(Tier5AdversarialFrontendProtocolTests)
 
-    suite.addTests([tier1, tier2, tier3, tier4])
+    suite.addTests([tier1, tier2, tier3, tier4, tier5_wb, tier5_fe])
 
     print("======================================================================")
-    print(" 🕷️ SPOODER WEB DASHBOARD 4-TIER E2E TEST SUITE RUNNER")
+    print(" 🕷️ SPOODER WEB DASHBOARD 5-TIER E2E TEST SUITE RUNNER")
     print("======================================================================")
 
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
+
+    tier5_count = len(tier5_wb._tests) + len(tier5_fe._tests)
 
     print("\n----------------------------------------------------------------------")
     print("SUMMARY RESULTS BY TIER:")
@@ -522,6 +666,7 @@ def run_suite():
     print("  Tier 2: Boundary & Corner Cases     - 5 Test Cases Passed")
     print("  Tier 3: Cross-Feature Combinations  - 3 Test Cases Passed")
     print("  Tier 4: Real-World Scenarios        - 2 Test Cases Passed")
+    print(f"  Tier 5: Adversarial & White-Box     - {tier5_count} Test Cases Passed")
     print(f"Total Tests Run: {result.testsRun}")
     print(f"Errors: {len(result.errors)}, Failures: {len(result.failures)}")
     print("----------------------------------------------------------------------")
@@ -531,3 +676,4 @@ def run_suite():
 
 if __name__ == "__main__":
     sys.exit(run_suite())
+

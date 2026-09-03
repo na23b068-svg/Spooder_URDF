@@ -12,8 +12,8 @@
 |---|------|-------|-------------|--------|
 | E2E | E2E Testing Track | Independent requirement-driven test suite | None | DONE |
 | M1 | Crouch-Walk Gait Engine | `server.py` `run_gait()` neutral femur baseline -45° | None | DONE |
-| M2 | Linear Crouch Slider & Dynamic Twist | `index.html`, `app.js`, `server.py` crouch slider -45 to +45 & sync | M1 | IN_PROGRESS |
-| M3 | Final E2E Test & Coverage Hardening | Pass 100% E2E tests + Tier 5 adversarial testing | E2E, M1, M2 | PLANNED |
+| M2 | Linear Crouch Slider & Dynamic Twist | `index.html`, `app.js`, `server.py` crouch slider -45 to +45 & sync | M1 | DONE |
+| M3 | Final E2E Test & Coverage Hardening | Pass 100% E2E tests + Tier 5 adversarial testing | E2E, M1, M2 | IN_PROGRESS |
 
 ## Interface Contracts
 ### Frontend ↔ Backend (Crouch Slider / Posture)

@@ -194,6 +194,22 @@ function initUI() {
         document.querySelector('.stand-label').classList.toggle('active', e.target.checked);
     });
 
+    let crouchThrottleTimer = null;
+    let pendingCrouchVal = null;
+    function sendThrottledCrouch(val) {
+        pendingCrouchVal = val;
+        if (!crouchThrottleTimer) {
+            crouchThrottleTimer = setTimeout(() => {
+                if (pendingCrouchVal !== null) {
+                    const active = (pendingCrouchVal !== 0);
+                    sendCommand({ type: 'set_crouch', offset: pendingCrouchVal, active: active });
+                    pendingCrouchVal = null;
+                }
+                crouchThrottleTimer = null;
+            }, 35);
+        }
+    }
+
     const sliderCrouch = document.getElementById('slider-crouch');
     const valCrouch = document.getElementById('val-crouch');
     if (sliderCrouch) {
@@ -201,7 +217,7 @@ function initUI() {
             resetAllButtons(null);
             const val = parseInt(e.target.value);
             if (valCrouch) {
-                valCrouch.textContent = `${val}°`;
+                valCrouch.textContent = val > 0 ? `+${val}°` : `${val}°`;
             }
             const active = (val !== 0);
             const crouchToggle = document.getElementById('crouch-toggle');
@@ -212,7 +228,13 @@ function initUI() {
                 if (offLabel) offLabel.classList.toggle('active', !active);
                 if (onLabel) onLabel.classList.toggle('active', active);
             }
-            sendCommand({ type: 'set_crouch', cmd: 'set_crouch', offset: val, active: active });
+            sendThrottledCrouch(val);
+        });
+
+        sliderCrouch.addEventListener('change', (e) => {
+            const val = parseInt(e.target.value);
+            const active = (val !== 0);
+            sendCommand({ type: 'set_crouch', offset: val, active: active });
         });
     }
 
@@ -228,13 +250,13 @@ function initUI() {
                 sliderCrouch.value = val;
             }
             if (valCrouch) {
-                valCrouch.textContent = `${val}°`;
+                valCrouch.textContent = val > 0 ? `+${val}°` : `${val}°`;
             }
             const offLabel = document.querySelector('.crouch-off-label');
             const onLabel = document.querySelector('.crouch-on-label');
             if (offLabel) offLabel.classList.toggle('active', !active);
             if (onLabel) onLabel.classList.toggle('active', active);
-            sendCommand({ type: 'set_crouch', cmd: 'set_crouch', offset: val, active: active });
+            sendCommand({ type: 'set_crouch', offset: val, active: active });
         });
     }
 
@@ -318,10 +340,10 @@ function initWebSocket() {
             if (data.crouch_offset !== undefined) {
                 const crouchVal = data.crouch_offset;
                 if (sliderCrouch) sliderCrouch.value = crouchVal;
-                if (valCrouch) valCrouch.textContent = `${crouchVal}°`;
+                if (valCrouch) valCrouch.textContent = crouchVal > 0 ? `+${crouchVal}°` : `${crouchVal}°`;
             }
-            if (data.crouch_active !== undefined) {
-                const crouchActive = data.crouch_active;
+            const crouchActive = data.crouch_enabled !== undefined ? data.crouch_enabled : data.crouch_active;
+            if (crouchActive !== undefined) {
                 if (crouchToggle) crouchToggle.checked = crouchActive;
                 const offLabel = document.querySelector('.crouch-off-label');
                 const onLabel = document.querySelector('.crouch-on-label');
