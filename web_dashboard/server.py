@@ -544,12 +544,8 @@ class SpooderServer:
                         self.crouch_active = active
                         self.crouch_offset = offset
 
-                        if offset <= 0:
-                            coxa_target = 0
-                            femur_target = offset
-                        else:
-                            coxa_target = offset
-                            femur_target = -offset
+                        coxa_target = offset
+                        femur_target = -abs(offset)
 
                         targets = {}
                         for ch in LEG_COXA_CHANNELS:
